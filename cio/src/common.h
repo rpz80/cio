@@ -1,0 +1,19 @@
+#if !defined(CIO_COMMON_H)
+#define CIO_COMMON_H
+
+enum CIO_ERROR {
+    CIO_NO_ERROR,
+    CIO_UNKNOWN_ERROR,
+    CIO_ALREADY_EXISTS_ERROR,
+    CIO_ALLOC_ERROR,
+    CIO_NOT_FOUND_ERROR,
+    
+    CIO_ERROR_COUNT
+};
+
+enum CIO_FLAGS {
+    CIO_READ = 1,
+    CIO_WRITE = 2
+};
+
+#endif

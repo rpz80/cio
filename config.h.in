@@ -1,0 +1,2 @@
+#cmakedefine HAVE_POLL_H
+#cmakedefine HAVE_EPOLL_H
