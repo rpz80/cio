@@ -12,8 +12,10 @@ enum CIO_ERROR {
 };
 
 enum CIO_FLAGS {
-    CIO_READ = 1,
-    CIO_WRITE = 2
+    CIO_FLAG_IN = 1,
+    CIO_FLAG_OUT = 2,
+    CIO_FLAG_ERR = 4,
+    CIO_FLAG_RDHUP = 8,
 };
 
 #endif

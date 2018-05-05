@@ -8,5 +8,6 @@ int teardown_pollset_tests(void **ctx);
 
 void test_pollset_add(void **ctx);
 void test_pollset_remove(void **ctx);
+void test_pollset_poll(void **ctx);
 
 #endif // POLLSET_UT_H
