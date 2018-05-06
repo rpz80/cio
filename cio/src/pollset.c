@@ -145,8 +145,7 @@ void *cio_new_pollset()
 
 int *cio_free_pollset(void *pollset)
 {
-    free_pollset(pollset);
-    return CIO_NO_ERROR;
+    return free_pollset(pollset);
 }
 
 int cio_pollset_add(void *pollset, int fd, int flags)
