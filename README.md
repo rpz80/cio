@@ -1,1 +1,1 @@
-# cio - C synchronous io library
+# cio - C asynchronous io library

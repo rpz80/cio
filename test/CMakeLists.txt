@@ -14,6 +14,6 @@ externalproject_add(
 include_directories("${CMAKE_SOURCE_DIR}/cio/src" "${CMAKE_SOURCE_DIR}/test/3rdparty/ct/src")
 
 file(GLOB TEST_SRC "src/*.c" "src/*.h")
-add_executable(test ${TEST_SRC})
-target_link_libraries(test PRIVATE cio "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/ct/lib/libct.a")
-add_dependencies(test ct)
+add_executable(cio_test ${TEST_SRC})
+target_link_libraries(cio_test PRIVATE cio "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/ct/lib/libct.a")
+add_dependencies(cio_test ct)
