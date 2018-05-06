@@ -3,10 +3,8 @@
 
 #include "common.h"
 
-typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
-
 void *cio_new_pollset();
-int *cio_free_pollset(void *pollset);
+void cio_free_pollset(void *pollset);
 int cio_pollset_add(void *pollset, int fd, int flags);
 int cio_pollset_remove(void *pollset, int fd);
 int cio_pollset_size(void *pollset);

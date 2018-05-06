@@ -1,8 +1,10 @@
 #include "pollset_ut.h"
+#include "event_loop_ut.h"
 #include <ct.h>
 
 int main(int argc, char *argv[])
 {
+    int result;
     ct_initialize(argc, argv);
     struct ct_ut pollset_tests[] = {
         TEST(test_pollset_new),
@@ -10,5 +12,11 @@ int main(int argc, char *argv[])
         TEST(test_pollset_remove),
         TEST(test_pollset_poll)
     };
-    return RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);
+
+    struct ct_ut event_loop_tests[] = {
+        TEST(test_event_loop_add_fd)
+    };
+    result = RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);
+    result |= RUN_TESTS(event_loop_tests, setup_event_loop_tests, teardown_event_loop_tests);
+    return result;
 }

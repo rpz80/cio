@@ -36,12 +36,11 @@ static void *new_pollset()
     return result;
 }
 
-static int *free_pollset(void *pollset)
+static void free_pollset(void *pollset)
 {
     struct pollset *ps = (struct pollset *) pollset;
     free(ps->pollfds);
     free(pollset);
-    return CIO_NO_ERROR;
 }
 
 static int pollset_add(void *pollset, int fd, int flags)
@@ -143,9 +142,9 @@ void *cio_new_pollset()
     return new_pollset();
 }
 
-int *cio_free_pollset(void *pollset)
+void cio_free_pollset(void *pollset)
 {
-    return free_pollset(pollset);
+    free_pollset(pollset);
 }
 
 int cio_pollset_add(void *pollset, int fd, int flags)

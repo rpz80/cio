@@ -18,4 +18,6 @@ enum CIO_FLAGS {
     CIO_FLAG_RDHUP = 8
 };
 
+typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
+
 #endif
