@@ -1,6 +1,7 @@
 #include "event_loop.h"
 #include "pollset.h"
 #include <stdlib.h>
+#include <pthread.h>
 
 struct _event_loop {
     void *pollset;
