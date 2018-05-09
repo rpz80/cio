@@ -11,6 +11,8 @@ enum CIO_ERROR {
     CIO_ERROR_COUNT
 };
 
+void cio_perror(enum CIO_ERROR error);
+
 enum CIO_FLAGS {
     CIO_FLAG_IN = 1,
     CIO_FLAG_OUT = 2,
