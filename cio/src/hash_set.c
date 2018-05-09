@@ -1,50 +1,141 @@
 #include "hash_set.h"
 #include <stdlib.h>
+#include <string.h>
 
 struct node {
     void *data;
     struct node *next;
 };
 
+static struct node *new_node(void *data, struct node *first,
+    int (*cmp)(const void *, const void *))
+{
+    struct node *n = NULL;
+    struct node *tmp = NULL;
+    for (tmp = first; tmp; tmp = tmp->next) {
+        if (cmp(data, tmp->data))
+            return NULL;
+    }
+    n = malloc(sizeof(struct node));
+    if (!n)
+        return NULL;
+    if (first) {
+        tmp = first;
+        while (tmp->next)
+            tmp = tmp->next;
+        tmp->next = n;
+        return first;
+    }
+    return n;
+}
+
+static void free_node(struct node *n, void (*release)(void *))
+{
+    while (n->next) {
+        free_node(n->next, release);
+    }
+    if (release)
+        release(n->data);
+    free(n);
+}
+
+static void *remove_node(struct node **first, const void* data,
+    int (*cmp)(const void *, const void *))
+{
+    struct node *prev = NULL;
+    struct node *f = *first;
+    void *result = NULL;
+    if (!f)
+        return result;
+    while (f) {
+        if (cmp(data, f->data)) {
+            result = f->data;
+            if (prev) {
+                prev->next = f->next;
+            } else if (f->next) {
+                *first = f->next;
+            }
+            free(f);
+            break;
+        }
+        prev = f;
+        f = f->next;
+    }
+    return result;
+}
+
+static unsigned jenkins_hash(const char* key, unsigned int length)
+{
+    unsigned i = 0;
+    unsigned hash = 0;
+    while (i != length) {
+        hash += key[i++];
+        hash += hash << 10;
+        hash ^= hash >> 6;
+    }
+    hash += hash << 3;
+    hash ^= hash >> 11;
+    hash += hash << 15;
+    return hash;
+}
+
 struct hset {
     int (*cmp)(const void *, const void *);
-    struct node *data;
-    int capacity;
+    void (*release)(void *);
+    struct node **nodes;
+    unsigned capacity;
 };
 
-void *cio_new_hash_set(int capacity, int (*cmp)(const void *, const void *))
+void *cio_new_hash_set(unsigned capacity, int (*cmp)(const void *, const void *),
+    void (*release)(void *))
 {
     struct hset *s = malloc(sizeof(struct hset));
     if (!s)
         return NULL;
-    s->data = calloc(capacity, sizeof(s->data));
-    if (!s->data) {
-        free(hset);
+    s->nodes = calloc(capacity, sizeof(*s->nodes));
+    if (!s->nodes) {
+        free(s);
         return NULL;
     }
+    memset(s->nodes, 0, sizeof(*s->nodes)*capacity);
     s->capacity = capacity;
     s->cmp = cmp;
+    s->release = release;
     return s;
 }
 
 void cio_free_hash_set(void *set)
 {
     struct hset *s = (struct hset *)set;
-    free(s->data);
+    int i;
+    for (i = 0; i < s->capacity; ++i) {
+        if (s->nodes[i])
+            free_node(s->nodes[i], s->release);
+    }
+    free(s->nodes);
     free(s);
 }
 
-void *cio_hash_set_add(void *set, void *elem)
+void *cio_hash_set_add(void *set, void *elem, unsigned elem_size)
 {
-
+    struct hset *s = (struct hset *)set;
+    unsigned pos = jenkins_hash(elem, elem_size) % s->capacity;
+    s->nodes[pos] = new_node(elem, s->nodes[pos], s->cmp);
+    if (!s->nodes[pos])
+        return NULL;
+    return elem;
 }
 
-void *cio_hash_set_get(void *set, void *elem)
+void *cio_hash_set_get(void *set, void *elem, unsigned elem_size)
 {
-
+    struct hset *s = (struct hset *)set;
+    unsigned pos = jenkins_hash(elem, elem_size) % s->capacity;
+    return s->nodes[pos];
 }
 
-void *cio_hash_set_remove(void *set, void *elem)
+void *cio_hash_set_remove(void *set, void *elem, unsigned elem_size)
 {
-
+    struct hset *s = (struct hset *)set;
+    unsigned pos = jenkins_hash(elem, elem_size) % s->capacity;
+    return remove_node(&s->nodes[pos], elem, s->cmp);
 }

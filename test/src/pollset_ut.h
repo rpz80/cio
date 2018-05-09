@@ -1,5 +1,5 @@
-#if !defined(POLLSET_UT_H)
-#define POLLSET_UT_H
+#if !defined(CIO_POLLSET_UT_H)
+#define CIO_POLLSET_UT_H
 
 void test_pollset_new(void **ctx);
 
