@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#if defined (HAVE_EPOLL_H)
+#if 0
 static void *new_pollset()
 {
     return NULL;
@@ -46,9 +46,9 @@ static void free_pollset(void *pollset)
 static int pollset_add(void *pollset, int fd, int flags)
 {
     struct pollset *ps = (struct pollset *) pollset;
-    int unreserved_index = -1;
+    int i, unreserved_index = -1;
 
-    for (int i = 0; i < ps->size; ++i) {
+    for (i = 0; i < ps->size; ++i) {
         if (ps->pollfds[i].fd == fd)
             return CIO_ALREADY_EXISTS_ERROR;
         if (ps->pollfds[i].fd == -1)

@@ -9,6 +9,7 @@ externalproject_add(
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/test/3rdparty/ct"
     CMAKE_ARGS -DwithExample=OFF -DCMAKE_INSTALL_PREFIX=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/ct
     MAKE_COMMNAD ""
+    BUILD_BYPRODUCTS "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/ct/lib/libct.a"
 )
 
 include_directories("${CMAKE_SOURCE_DIR}/cio/src" "${CMAKE_SOURCE_DIR}/test/3rdparty/ct/src")
