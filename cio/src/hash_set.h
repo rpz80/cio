@@ -22,7 +22,7 @@ void *cio_hash_set_add(void *set, void *elem);
 /**
  * Returns pointer to the elem if it is in the set, NULL otherwise.
  */
-void *cio_hash_set_get(void *set, void *elem);
+void *cio_hash_set_get(void *set, const void *elem);
 
 /**
  * Returns pointer to the elem if it is in the set and remove successful, NULL otherwise.

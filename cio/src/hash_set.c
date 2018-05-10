@@ -19,6 +19,8 @@ static struct node *new_node(void *data, struct node *first,
     n = malloc(sizeof(struct node));
     if (!n)
         return NULL;
+    n->next = NULL;
+    n->data = data;
     if (first) {
         tmp = first;
         while (tmp->next)
@@ -31,6 +33,8 @@ static struct node *new_node(void *data, struct node *first,
 
 static void free_node(struct node *n, void (*release)(void *))
 {
+    if (!n)
+        return;
     while (n->next) {
         free_node(n->next, release);
     }
@@ -62,6 +66,16 @@ static void *remove_node(struct node **first, const void* data,
         f = f->next;
     }
     return result;
+}
+
+static void *get_node_data(const struct node *first, const void *elem,
+    int (*cmp)(const void *, const void *))
+{
+    for ( ; first; first = first->next) {
+        if (cmp(first->data, elem))
+            return first->data;
+    }
+    return NULL;
 }
 
 static unsigned jenkins_hash(const void *elem,
@@ -132,11 +146,11 @@ void *cio_hash_set_add(void *set, void *elem)
     return elem;
 }
 
-void *cio_hash_set_get(void *set, void *elem)
+void *cio_hash_set_get(void *set, const void *elem)
 {
     struct hset *s = (struct hset *)set;
     unsigned pos = jenkins_hash(elem, s->hash_data) % s->capacity;
-    return s->nodes[pos];
+    return get_node_data(s->nodes[pos], elem, s->cmp);
 }
 
 void *cio_hash_set_remove(void *set, void *elem)
