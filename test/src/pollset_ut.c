@@ -3,6 +3,8 @@
 #include <ct.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 void test_pollset_new(void **ctx)
 {
@@ -60,21 +62,28 @@ void test_pollset_remove(void **ctx)
 
 static void pollset_cb(void *ctx, int fd, int flags)
 {
-    (void) ctx;
-    ASSERT_TRUE(flags & CIO_FLAG_OUT);
-    ASSERT_TRUE(flags & CIO_FLAG_IN);
-    ASSERT_TRUE(fd == 0 || fd == 1);
+    int *test_pipe = ctx;
+
+    if (fd == test_pipe[0]) {
+        ASSERT_TRUE(flags & CIO_FLAG_IN);
+        ASSERT_FALSE(flags & CIO_FLAG_OUT);
+    } else {
+        ASSERT_TRUE(flags & CIO_FLAG_OUT);
+        ASSERT_FALSE(flags & CIO_FLAG_IN);
+    }
 }
 
 void test_pollset_poll(void **ctx)
 {
     int result;
+    int test_pipe[2];
 
-    result = cio_pollset_add(*ctx, fileno(stdout), CIO_FLAG_IN | CIO_FLAG_OUT);
+    ASSERT_EQ_INT(0, pipe(test_pipe));
+    result = cio_pollset_add(*ctx, test_pipe[0], CIO_FLAG_IN | CIO_FLAG_OUT);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 
-    result = cio_pollset_add(*ctx, fileno(stdin), CIO_FLAG_IN | CIO_FLAG_OUT);
+    result = cio_pollset_add(*ctx, test_pipe[1], CIO_FLAG_IN | CIO_FLAG_OUT);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 
-    ASSERT_EQ_INT(2, cio_pollset_poll(*ctx, -1, NULL, pollset_cb));
+    ASSERT_EQ_INT(2, cio_pollset_poll(*ctx, -1, test_pipe, pollset_cb));
 }
