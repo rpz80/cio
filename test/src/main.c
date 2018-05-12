@@ -17,7 +17,7 @@ int main(int argc, char *argv[])
         TEST(test_event_loop_add_fd)
     };
     struct ct_ut hash_set_tests[] = {
-        TEST(test_hash_set_add)
+        TEST(test_int_hash_set_w_release)
     };
     result = RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);
     result |= RUN_TESTS(event_loop_tests, setup_event_loop_tests, teardown_event_loop_tests);

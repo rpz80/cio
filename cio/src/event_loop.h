@@ -10,10 +10,6 @@ int cio_event_loop_start(void *loop);
 int cio_event_loop_stop(void *loop);
 int cio_event_loop_add_fd(void *loop, int fd, void *cb_ctx, pollset_cb_t cb);
 int cio_event_loop_remove_fd(void *loop, int fd);
-/**
- * timemout < 0 - infinite timeout
- * timeout == 0 - not timeout, just poll
- */
 int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *));
 
 #endif // CIO_EVENT_LOOP_H

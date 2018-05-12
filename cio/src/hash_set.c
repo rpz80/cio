@@ -58,6 +58,8 @@ static void *remove_node(struct node **first, const void* data,
                 prev->next = f->next;
             } else if (f->next) {
                 *first = f->next;
+            } else {
+                *first = NULL;
             }
             free(f);
             break;
@@ -139,10 +141,12 @@ void cio_free_hash_set(void *set)
 void *cio_hash_set_add(void *set, void *elem)
 {
     struct hset *s = (struct hset *)set;
+    struct node *n = NULL;
     unsigned pos = jenkins_hash(elem, s->hash_data) % s->capacity;
-    s->nodes[pos] = new_node(elem, s->nodes[pos], s->cmp);
-    if (!s->nodes[pos])
+    n = new_node(elem, s->nodes[pos], s->cmp);
+    if (!n)
         return NULL;
+    s->nodes[pos] = n;
     return elem;
 }
 
