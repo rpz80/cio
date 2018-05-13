@@ -1,4 +1,5 @@
 build/
 .build/
 *.user
+config.h
 3rdparty/

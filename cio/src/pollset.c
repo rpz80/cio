@@ -116,14 +116,15 @@ static int pollset_poll(void *pollset, int timeout_ms, void *cb_ctx, pollset_cb_
     } else {
         for (i = 0; i < ps->size; ++i) {
             if (ps->pollfds[i].revents != 0) {
-                if (ps->pollfds[i].revents | POLLIN)
+                flags = 0;
+                if (ps->pollfds[i].revents & POLLIN)
                     flags = CIO_FLAG_IN;
-                if (ps->pollfds[i].revents | POLLOUT)
+                if (ps->pollfds[i].revents & POLLOUT)
                     flags |= CIO_FLAG_OUT;
-                if (ps->pollfds[i].revents | POLLERR)
+                if (ps->pollfds[i].revents & POLLERR)
                     flags |= CIO_FLAG_ERR;
 #if defined (_GNU_SOURCE)
-                if (ps->pollfds[i].revents | POLLRDHUP)
+                if (ps->pollfds[i].revents & POLLRDHUP)
                     flags |= CIO_FLAG_RDHUP;
 #endif
                 cb(cb_ctx, ps->pollfds[i].fd, flags);

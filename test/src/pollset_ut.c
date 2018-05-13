@@ -77,13 +77,18 @@ void test_pollset_poll(void **ctx)
 {
     int result;
     int test_pipe[2];
+    char buf[] = "hello";
 
     ASSERT_EQ_INT(0, pipe(test_pipe));
-    result = cio_pollset_add(*ctx, test_pipe[0], CIO_FLAG_IN | CIO_FLAG_OUT);
+    ASSERT_LT_INT(0, write(test_pipe[1], buf, sizeof(buf)));
+    
+    result = cio_pollset_add(*ctx, test_pipe[0], CIO_FLAG_IN);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 
-    result = cio_pollset_add(*ctx, test_pipe[1], CIO_FLAG_IN | CIO_FLAG_OUT);
+    result = cio_pollset_add(*ctx, test_pipe[1], CIO_FLAG_OUT);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 
     ASSERT_EQ_INT(2, cio_pollset_poll(*ctx, -1, test_pipe, pollset_cb));
+    close(test_pipe[0]);
+    close(test_pipe[1]);
 }
