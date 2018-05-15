@@ -73,6 +73,8 @@ static void pollset_cb(void *ctx, int fd, int flags)
     }
 }
 
+/* #TODO socket poll tests */
+
 void test_pollset_poll(void **ctx)
 {
     int result;
