@@ -38,7 +38,7 @@ int teardown_struct_hash_set_tests(void **ctx)
     return 0;
 }
 
-void test_struct_hash_set_w_release(void **ctx)
+void test_struct_hash_set_without_release(void **ctx)
 {
     test_struct_t *elem = malloc(sizeof(test_struct_t)), *elem1 = malloc(sizeof(test_struct_t));
     test_struct_t not_existing_elem = {12.0, 56};

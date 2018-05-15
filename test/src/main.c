@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     struct ct_ut hash_set_tests[] = {
         TEST_SETUP_TEARDOWN(test_int_hash_set_w_release, setup_int_hash_set_tests_with_release,
             teardown_int_hash_set_tests),
-        TEST_SETUP_TEARDOWN(test_struct_hash_set_w_release,
+        TEST_SETUP_TEARDOWN(test_struct_hash_set_without_release,
             setup_struct_hash_set_tests_without_release, teardown_struct_hash_set_tests),
     };
 

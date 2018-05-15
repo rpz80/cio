@@ -4,6 +4,6 @@
 int setup_struct_hash_set_tests_without_release(void **ctx);
 int teardown_struct_hash_set_tests(void **ctx);
 
-void test_struct_hash_set_w_release(void **ctx);
+void test_struct_hash_set_without_release(void **ctx);
 
 #endif // CIO_STRUCT_HASH_SET_UT_H
