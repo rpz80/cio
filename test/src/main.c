@@ -25,6 +25,8 @@ int main(int argc, char *argv[])
             teardown_int_hash_set_tests),
         TEST_SETUP_TEARDOWN(test_struct_hash_set_without_release,
             setup_struct_hash_set_tests_without_release, teardown_struct_hash_set_tests),
+        TEST_SETUP_TEARDOWN(test_int_hash_set_linked_list,
+            setup_int_hash_set_tests_linked_list, teardown_int_hash_set_tests)
     };
 
     result = RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);

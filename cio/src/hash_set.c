@@ -41,7 +41,7 @@ static void free_node(struct node *n, void (*release)(void *))
     if (!n)
         return;
 
-    while (n->next) {
+    if (n->next) {
         free_node(n->next, release);
     }
 
