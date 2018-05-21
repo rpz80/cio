@@ -7,11 +7,12 @@ enum CIO_ERROR {
     CIO_ALREADY_EXISTS_ERROR,
     CIO_ALLOC_ERROR,
     CIO_NOT_FOUND_ERROR,
+    CIO_WRITE_ERROR,
     
     CIO_ERROR_COUNT
 };
 
-void cio_perror(enum CIO_ERROR error);
+void cio_perror(enum CIO_ERROR error, const char *message);
 
 enum CIO_FLAGS {
     CIO_FLAG_IN = 1,

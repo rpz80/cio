@@ -13,14 +13,14 @@ struct loop_ctx {
 static void *loop_thread_func(void *ctx)
 {
     struct loop_ctx *lctx = (struct loop_ctx *) ctx;
-    return (void *) cio_event_loop_start(lctx->loop);
+    return (void *) cio_event_loop_run(lctx->loop);
 }
 
 int setup_event_loop_tests(void **ctx)
 {
     struct loop_ctx *lctx = calloc(1, sizeof(struct loop_ctx));
     int result;
-    lctx->loop = cio_new_event_loop();
+    lctx->loop = cio_new_event_loop(1024);
     if ((result = pthread_create(&lctx->thread_handle, NULL, loop_thread_func, lctx))) {
         perror("thread_create");
         return result;
