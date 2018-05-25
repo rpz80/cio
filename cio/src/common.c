@@ -1,6 +1,7 @@
 #include "common.h"
 #include <assert.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 void cio_perror(enum CIO_ERROR error, const char *message)
 {
@@ -21,4 +22,9 @@ void cio_perror(enum CIO_ERROR error, const char *message)
     };
 
 #undef PRINT_ERROR
+}
+
+int timeMsFromTv(struct timeval *tv)
+{
+    return tv->tv_sec*1000 + tv->tv_usec/1000;
 }

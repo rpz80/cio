@@ -19,13 +19,31 @@ static void *loop_thread_func(void *ctx)
 int setup_event_loop_tests(void **ctx)
 {
     struct loop_ctx *lctx = calloc(1, sizeof(struct loop_ctx));
-    int result;
+    int result = -1;
+    const char *error_message = NULL;
+
     lctx->loop = cio_new_event_loop(1024);
+    if (!lctx->loop)
+        goto fail;
+
+    lctx->cond = PTHREAD_COND_INITIALIZER;
+    lctx->mutex = PTHREAD_MUTEX_INITIALIZER;
+
     if ((result = pthread_create(&lctx->thread_handle, NULL, loop_thread_func, lctx))) {
-        perror("thread_create");
-        return result;
+        error_message = "thread_create";
+        goto fail;
     }
+
+    *ctx = lctx;
     return 0;
+
+fail:
+    if (!lctx->loop)
+        cio_perror(CIO_ALLOC_ERROR, NULL);
+    else
+        perror(error_message);
+
+    return result;
 }
 
 int teardown_event_loop_tests(void **ctx)
@@ -40,6 +58,7 @@ int teardown_event_loop_tests(void **ctx)
         return result;
     }
     cio_free_event_loop(*ctx);
+
     return 0;
 }
 

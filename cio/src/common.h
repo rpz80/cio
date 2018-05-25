@@ -23,4 +23,6 @@ enum CIO_FLAGS {
 
 typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
 
+int timeMsFromTv(struct timeval *tv);
+
 #endif
