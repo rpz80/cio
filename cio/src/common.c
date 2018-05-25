@@ -1,7 +1,6 @@
 #include "common.h"
 #include <assert.h>
 #include <stdio.h>
-#include <sys/time.h>
 
 void cio_perror(enum CIO_ERROR error, const char *message)
 {

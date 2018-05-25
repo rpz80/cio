@@ -1,6 +1,8 @@
 #if !defined(CIO_COMMON_H)
 #define CIO_COMMON_H
 
+#include <sys/time.h>
+
 enum CIO_ERROR {
     CIO_NO_ERROR,
     CIO_UNKNOWN_ERROR,

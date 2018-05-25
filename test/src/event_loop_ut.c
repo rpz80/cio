@@ -26,8 +26,8 @@ int setup_event_loop_tests(void **ctx)
     if (!lctx->loop)
         goto fail;
 
-    lctx->cond = PTHREAD_COND_INITIALIZER;
-    lctx->mutex = PTHREAD_MUTEX_INITIALIZER;
+    lctx->cond = (pthread_cond_t) PTHREAD_COND_INITIALIZER;
+    lctx->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
 
     if ((result = pthread_create(&lctx->thread_handle, NULL, loop_thread_func, lctx))) {
         error_message = "thread_create";
@@ -90,7 +90,7 @@ void test_event_loop_add_fd(void **ctx)
     int result, added_check = 0;
     struct loop_ctx *lctx = (struct loop_ctx *) *ctx;
 
-    result = cio_event_loop_add_fd(lctx->loop, fileno(stdin), &added_check, test_add_cb);
+    result = cio_event_loop_add_fd(lctx->loop, fileno(stdin), CIO_FLAG_IN, &added_check, test_add_cb);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 
     if ((result = pthread_mutex_lock(&lctx->mutex))) {
