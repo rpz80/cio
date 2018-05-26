@@ -2,12 +2,14 @@
 #include <event_loop.h>
 #include <ct.h>
 #include <pthread.h>
+#include <unistd.h>
 
 struct loop_ctx {
     void *loop;
     pthread_t thread_handle;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
+    int cb_called;
 };
 
 static void *loop_thread_func(void *ctx)
@@ -19,7 +21,7 @@ static void *loop_thread_func(void *ctx)
 int setup_event_loop_tests(void **ctx)
 {
     struct loop_ctx *lctx = calloc(1, sizeof(struct loop_ctx));
-    int result = -1;
+    int ecode = -1;
     const char *error_message = NULL;
 
     lctx->loop = cio_new_event_loop(1024);
@@ -28,8 +30,9 @@ int setup_event_loop_tests(void **ctx)
 
     lctx->cond = (pthread_cond_t) PTHREAD_COND_INITIALIZER;
     lctx->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+    lctx->cb_called = 0;
 
-    if ((result = pthread_create(&lctx->thread_handle, NULL, loop_thread_func, lctx))) {
+    if ((ecode = pthread_create(&lctx->thread_handle, NULL, loop_thread_func, lctx))) {
         error_message = "thread_create";
         goto fail;
     }
@@ -43,7 +46,7 @@ fail:
     else
         perror(error_message);
 
-    return result;
+    return ecode;
 }
 
 int teardown_event_loop_tests(void **ctx)
@@ -57,25 +60,29 @@ int teardown_event_loop_tests(void **ctx)
         perror("join");
         return result;
     }
-    cio_free_event_loop(*ctx);
+    cio_free_event_loop(lctx->loop);
 
     return 0;
 }
 
+static const char send_buf[] = "hello";
+
 static void test_add_cb(void *ctx, int fd, int flags)
 {
-    struct loop_ctx *lctx = (struct loop_ctx *) ctx;
+    struct loop_ctx *lctx;
+    char rcv_buf[128];
 
-    ASSERT_EQ_INT(fileno(stdin), fd);
+    lctx = (struct loop_ctx *) ctx;
+
     ASSERT_TRUE(flags & CIO_FLAG_IN);
-    ASSERT_TRUE(flags & CIO_FLAG_OUT);
+    ASSERT_EQ_INT(sizeof(send_buf), read(fd, rcv_buf, sizeof(rcv_buf)));
 
-     if (pthread_mutex_lock(&lctx->mutex)) {
+    if (pthread_mutex_lock(&lctx->mutex)) {
         perror("lock");
         return;
     }
 
-    *((int *) ctx) = 1;
+    lctx->cb_called = 1;
     if (pthread_cond_signal(&lctx->cond)) {
         pthread_mutex_unlock(&lctx->mutex);
         perror("signal");
@@ -87,10 +94,16 @@ static void test_add_cb(void *ctx, int fd, int flags)
 
 void test_event_loop_add_fd(void **ctx)
 {
-    int result, added_check = 0;
-    struct loop_ctx *lctx = (struct loop_ctx *) *ctx;
+    int result;
+    struct loop_ctx *lctx;
+    int test_pipe[2];
 
-    result = cio_event_loop_add_fd(lctx->loop, fileno(stdin), CIO_FLAG_IN, &added_check, test_add_cb);
+    lctx = (struct loop_ctx *) *ctx;
+
+    ASSERT_EQ_INT(0, pipe(test_pipe));
+    ASSERT_LT_INT(0, write(test_pipe[1], send_buf, sizeof(send_buf)));
+    
+    result = cio_event_loop_add_fd(lctx->loop, test_pipe[0], CIO_FLAG_IN, lctx, test_add_cb);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 
     if ((result = pthread_mutex_lock(&lctx->mutex))) {
@@ -98,7 +111,7 @@ void test_event_loop_add_fd(void **ctx)
         return;
     }
 
-    while (added_check == 0) {
+    while (lctx->cb_called == 0) {
         if ((result = pthread_cond_wait(&lctx->cond, &lctx->mutex))) {
             pthread_mutex_unlock(&lctx->mutex);
             perror("wait");
@@ -109,6 +122,6 @@ void test_event_loop_add_fd(void **ctx)
     if ((result = pthread_mutex_unlock(&lctx->mutex)))
         perror("unlock");
 
-    ASSERT_EQ_INT(1, added_check);
+    ASSERT_EQ_INT(1, lctx->cb_called);
 }
 

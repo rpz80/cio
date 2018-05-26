@@ -17,6 +17,8 @@ void cio_perror(enum CIO_ERROR error, const char *message)
     case CIO_ALLOC_ERROR:           PRINT_ERROR(message, "allocation error"); break;
     case CIO_NOT_FOUND_ERROR:       PRINT_ERROR(message, "not found"); break;
     case CIO_WRITE_ERROR:           PRINT_ERROR(message, "write error"); break;
+    case CIO_READ_ERROR:            PRINT_ERROR(message, "read error"); break;
+    case CIO_POLL_ERROR:            PRINT_ERROR(message, "poll error"); break;
     case CIO_ERROR_COUNT:           assert(0); break;
     };
 
