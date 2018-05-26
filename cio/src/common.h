@@ -10,6 +10,7 @@ enum CIO_ERROR {
     CIO_ALLOC_ERROR,
     CIO_NOT_FOUND_ERROR,
     CIO_WRITE_ERROR,
+    CIO_READ_ERROR,
     
     CIO_ERROR_COUNT
 };
@@ -25,6 +26,6 @@ enum CIO_FLAGS {
 
 typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
 
-int timeMsFromTv(struct timeval *tv);
+int time_ms(struct timeval *tv);
 
 #endif

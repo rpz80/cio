@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <fcntl.h>
+#include <errno.h>
 
 struct user_fd_cb_ctx {
     pollset_cb_t cb;
@@ -35,21 +37,16 @@ enum event_code {
     WAKE_UP
 };
 
-static void event_pipe_cb(void *ctx, int fd, int flags)
+static void toggle_fd_blocking(int *fd, int on)
 {
-    struct event_loop *el = (struct event_loop *) ctx;
+    int flags;
 
-    assert(fd == el->event_pipe[0]);
-    if (fd != el->event_pipe[0]) {
-        cio_perror(CIO_UNKNOWN_ERROR, "Wrong event pipe descriptor");
-        return;
-    }
-
-    assert(flags & CIO_FLAG_IN);
-    if (!(flags & CIO_FLAG_IN))
-        cio_perror(CIO_UNKNOWN_ERROR, "Wrong event pipe flags");
-
-    el->need_stop = 1;
+    flags = fcntl(fd, F_GETFL);
+    if (on)
+        flags |= O_NONBLOCK;
+    else
+        flags &= ~O_NONBLOCK;
+    fcntl(fd, F_SETFL, flags);
 }
 
 static int user_fd_cb_ctx_cmp(const void *l, const void *r)
@@ -111,23 +108,100 @@ fail:
 void cio_free_event_loop(void *loop)
 {
     struct event_loop *el = (struct event_loop *) loop;
+
     cio_free_pollset(el->pollset);
+    cio_free_hash_set(el->fd_set);
+    close(el->event_pipe[0]);
+    close(el->event_pipe[1]);
     free(loop);
 }
 
 static void pollset_cb(void *ctx, int fd, int flags)
 {
+    struct event_loop *el = (struct event_loop *) ctx;
+    int ecode = 0;
+    int event_code;
 
+    if (fd == el->event_pipe[0]) {
+        assert(flags & CIO_FLAG_IN);
+        if (flags & CIO_FLAG_ERR || !(flags & CIO_FLAG_IN)) {
+            ecode = CIO_READ_ERROR;
+            goto fail;
+        }
+
+        if (read(fd, &event_code, sizeof(event_code)) <= 0)
+            goto fail;
+
+        switch (event_code) {
+        case STOP:
+            el->need_stop = 1;
+            return;
+        case WAKE_UP:
+            return;
+        default:
+            assert(0);
+            ecode = CIO_READ_ERROR;
+            goto fail;
+        }
+    }
+
+    return;
+
+fail:
+    if (ecode)
+        cio_perror(ecode, "pollset_cb");
+    else
+        perror("pollset_cb");
 }
 
 int cio_event_loop_run(void *loop)
 {
-    struct event_loop *el = (struct event_loop *) loop;
+    struct event_loop *el;
+    int ecode;
+    int now_time_ms;
+    struct timeval tv;
+    struct timer_cb_ctx *tctx, *prev_tctx;
+
+    el = (struct event_loop *) loop;
+    ecode = 0;
+
     do {
         cio_pollset_poll(el->pollset, -1, el, pollset_cb);
-    } while (!el->need_stop);
+
+        if (pthread_mutex_lock(&el->mutex))
+            goto fail;
+
+        if (el->need_stop)
+            break;
+
+        if (gettimeofday(&tv, NULL) < 0)
+            goto fail;
+
+        now_time_ms = time_ms(&tv);
+        tctx = el->timer_actions;
+        while (tctx && tctx->due_time <= now_time_ms) {
+            tctx->action(tctx->action_ctx);
+            prev_tctx = tctx;
+            tctx = tctx->next;
+            if (prev_tctx == el->timer_actions)
+                el->timer_actions = tctx;
+            free(prev_tctx);
+        }
+
+    } while (1);
 
     return CIO_NO_ERROR;
+
+fail:
+    pthread_mutex_unlock(&el->mutex);
+
+    if (ecode) {
+        cio_perror(ecode, "cio_event_loop_run");
+        return ecode;
+    } else {
+        perror("cio_event_loop_run");
+        return errno;
+    }
 }
 
 static int send_pipe_event(void *loop, int code)
@@ -234,7 +308,7 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
 
     timer_ctx->action = cb;
     timer_ctx->action_ctx = cb_ctx;
-    timer_ctx->due_time = timeMsFromTv(&tv) + timeout_ms;
+    timer_ctx->due_time = time_ms(&tv) + timeout_ms;
     timer_ctx->next = NULL;
 
     ta = prev_ta = el->timer_actions;
