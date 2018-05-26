@@ -78,11 +78,8 @@ static void user_fd_cb_ctx_release(void *elem)
 
 void *cio_new_event_loop(int expected_capacity)
 {
-    struct event_loop *el;
-    int ecode;
-
-    el = malloc(sizeof(struct event_loop));
-    ecode = 0;
+    struct event_loop *el = malloc(sizeof(struct event_loop));;
+    int ecode = 0;
 
     el->pollset = cio_new_pollset();
     el->need_stop = 0;
@@ -124,23 +121,27 @@ fail:
 void cio_free_event_loop(void *loop)
 {
     struct event_loop *el = (struct event_loop *) loop;
+    struct timer_cb_ctx *tctx = el->timer_actions, *tmp_tctx;
 
     cio_free_pollset(el->pollset);
     cio_free_hash_set(el->fd_set);
     close(el->event_pipe[0]);
     close(el->event_pipe[1]);
+    while (tctx) {
+        tmp_tctx = tctx;
+        tctx = tctx->next;
+        free(tmp_tctx);
+    }
+
     free(loop);
 }
 
 static void pollset_cb(void *ctx, int fd, int flags)
 {
-    struct event_loop *el;
-    int ecode;
+    struct event_loop *el = (struct event_loop *) ctx;;
+    int ecode = 0;
     int event_code;
     struct user_fd_cb_ctx search_fctx, *fctx;
-
-    el = (struct event_loop *) ctx;
-    ecode = 0;
 
     if (fd == el->event_pipe[0]) {
         assert(flags & CIO_FLAG_IN);
@@ -190,14 +191,11 @@ fail:
 
 int cio_event_loop_run(void *loop)
 {
-    struct event_loop *el;
-    int ecode;
+    struct event_loop *el = (struct event_loop *) loop;
+    int ecode = 0;
     int now_time_ms;
     struct timeval tv;
     struct timer_cb_ctx *tctx, *prev_tctx;
-
-    el = (struct event_loop *) loop;
-    ecode = 0;
 
     do {
         if ((ecode = cio_pollset_poll(el->pollset, -1, el, pollset_cb)) == -1)      
@@ -244,9 +242,7 @@ fail:
 
 static int send_pipe_event(void *loop, int code)
 {
-    struct event_loop *el;
-
-    el = (struct event_loop *) loop;
+    struct event_loop *el = (struct event_loop *) loop;;
     return write(el->event_pipe[1], &code, sizeof(code)) > 0 ? CIO_NO_ERROR : CIO_WRITE_ERROR;
 }
 
@@ -327,9 +323,6 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
     struct timer_cb_ctx *timer_ctx;
     struct timeval tv;
 
-    if (pthread_mutex_lock(&el->mutex))
-        goto fail;
-
     if (gettimeofday(&tv, NULL))
         goto fail;
 
@@ -340,6 +333,9 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
     timer_ctx->action_ctx = cb_ctx;
     timer_ctx->due_time = time_ms(&tv) + timeout_ms;
     timer_ctx->next = NULL;
+
+    if (pthread_mutex_lock(&el->mutex))
+        goto fail;
 
     ta = prev_ta = el->timer_actions;
     while (ta && ta->due_time < timer_ctx->due_time) {
