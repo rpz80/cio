@@ -123,6 +123,10 @@ static int pollset_poll(void *pollset, int timeout_ms, void *cb_ctx, pollset_cb_
                     flags |= CIO_FLAG_OUT;
                 if (ps->pollfds[i].revents & POLLERR)
                     flags |= CIO_FLAG_ERR;
+                if (ps->pollfds[i].revents & POLLHUP)
+                    flags |= (CIO_FLAG_ERR | CIO_FLAG_HUP);
+                if (ps->pollfds[i].revents & POLLNVAL)
+                    flags |= (CIO_FLAG_ERR | CIO_FLAG_NVAL);
 #if defined (_GNU_SOURCE)
                 if (ps->pollfds[i].revents & POLLRDHUP)
                     flags |= CIO_FLAG_RDHUP;

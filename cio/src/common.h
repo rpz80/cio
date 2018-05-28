@@ -22,7 +22,9 @@ enum CIO_FLAGS {
     CIO_FLAG_IN = 1,
     CIO_FLAG_OUT = 2,
     CIO_FLAG_ERR = 4,
-    CIO_FLAG_RDHUP = 8
+    CIO_FLAG_RDHUP = 8,
+    CIO_FLAG_HUP = 16,
+    CIO_FLAG_NVAL = 32
 };
 
 typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);

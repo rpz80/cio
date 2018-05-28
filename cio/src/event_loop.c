@@ -127,6 +127,7 @@ void cio_free_event_loop(void *loop)
     cio_free_hash_set(el->fd_set);
     close(el->event_pipe[0]);
     close(el->event_pipe[1]);
+    pthread_mutex_destroy(&el->mutex);
     while (tctx) {
         tmp_tctx = tctx;
         tctx = tctx->next;
