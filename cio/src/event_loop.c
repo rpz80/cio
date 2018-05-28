@@ -208,10 +208,10 @@ int cio_event_loop_run(void *loop)
         if (gettimeofday(&tv, NULL) < 0)
             goto fail;
 
+        now_time_ms = time_ms(&tv);
         if (pthread_mutex_lock(&el->mutex))
             goto fail;
 
-        now_time_ms = time_ms(&tv);
         tctx = el->timer_actions;
         while (tctx && tctx->due_time <= now_time_ms) {
             tctx->action(tctx->action_ctx);
