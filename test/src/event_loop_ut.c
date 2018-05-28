@@ -131,3 +131,4 @@ void test_event_loop_add_fd(void **ctx)
     ASSERT_EQ_INT(1, lctx->cb_called);
 }
 
+/* #TODO: remove fd ut */
