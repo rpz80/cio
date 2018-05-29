@@ -11,7 +11,7 @@ void cio_perror(enum CIO_ERROR error, const char *message)
 
     switch (error)
     {
-    case CIO_NO_ERROR:              PRINT_ERROR(message, "ok"); break;
+    case CIO_NO_ERROR:              PRINT_ERROR(message, "no error"); break;
     case CIO_UNKNOWN_ERROR:         PRINT_ERROR(message, "unknown error"); break;
     case CIO_ALREADY_EXISTS_ERROR:  PRINT_ERROR(message, "already exists"); break;
     case CIO_ALLOC_ERROR:           PRINT_ERROR(message, "allocation error"); break;

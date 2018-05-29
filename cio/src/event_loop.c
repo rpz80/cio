@@ -86,11 +86,8 @@ void *cio_new_event_loop(int expected_capacity)
     el->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
     el->timer_actions = NULL;
 
-    el->fd_set = cio_new_hash_set(
-        expected_capacity / 0.75,
-        user_fd_cb_ctx_cmp,
-        user_fd_cb_ctx_hash_data,
-        user_fd_cb_ctx_release);
+    el->fd_set = cio_new_hash_set(expected_capacity / 0.75, user_fd_cb_ctx_cmp,
+        user_fd_cb_ctx_hash_data, user_fd_cb_ctx_release);
 
     if (!el->fd_set) {
         ecode = CIO_ALLOC_ERROR;
@@ -183,7 +180,6 @@ static void pollset_cb(void *ctx, int fd, int flags)
     return;
 
 fail:
-    pthread_mutex_unlock(&el->mutex);
     if (ecode)
         cio_perror(ecode, "pollset_cb");
     else
@@ -193,13 +189,13 @@ fail:
 int cio_event_loop_run(void *loop)
 {
     struct event_loop *el = (struct event_loop *) loop;
-    int ecode = 0;
+    int ecode = 0, cio_ecode = 0;
     int now_time_ms;
     struct timeval tv;
     struct timer_cb_ctx *tctx, *prev_tctx;
 
     do {
-        if ((ecode = cio_pollset_poll(el->pollset, -1, el, pollset_cb)) == -1)
+        if ((cio_ecode = cio_pollset_poll(el->pollset, -1, el, pollset_cb)) == -1)
             goto fail;
 
         if (el->need_stop)
@@ -209,7 +205,7 @@ int cio_event_loop_run(void *loop)
             goto fail;
 
         now_time_ms = time_ms(&tv);
-        if (pthread_mutex_lock(&el->mutex))
+        if ((ecode = pthread_mutex_lock(&el->mutex)))
             goto fail;
 
         /* #TODO: move handler invocation out of mutex scope */
@@ -223,7 +219,7 @@ int cio_event_loop_run(void *loop)
             free(prev_tctx);
         }
 
-        if (pthread_mutex_unlock(&el->mutex))
+        if ((ecode = pthread_mutex_unlock(&el->mutex)))
             goto fail;
 
     } while (1);
@@ -233,12 +229,13 @@ int cio_event_loop_run(void *loop)
 fail:
     pthread_mutex_unlock(&el->mutex);
 
-    if (ecode) {
+    if (cio_ecode) {
         cio_perror(ecode, "cio_event_loop_run");
-        return ecode;
+        return cio_ecode;
     } else {
+        errno = ecode;
         perror("cio_event_loop_run");
-        return errno;
+        return ecode;
     }
 }
 
@@ -266,10 +263,10 @@ static void add_fd_impl(void *ctx)
     struct add_remove_ctx *actx = (struct add_remove_ctx *) ctx;
     struct event_loop *el = (struct event_loop *) actx->loop;
     struct user_fd_cb_ctx *fd_ctx = malloc(sizeof(struct user_fd_cb_ctx));
-    int ecode = 0;
+    int cio_ecode = 0;
 
     if (!fd_ctx) {
-        ecode = CIO_ALLOC_ERROR;
+        cio_ecode = CIO_ALLOC_ERROR;
         goto fail;
     }
 
@@ -277,12 +274,12 @@ static void add_fd_impl(void *ctx)
     fd_ctx->ctx = actx->cb_ctx;
     fd_ctx->cb = actx->cb;
 
-    if ((ecode = cio_pollset_add(el->pollset, actx->fd, actx->flags))) {
+    if ((cio_ecode = cio_pollset_add(el->pollset, actx->fd, actx->flags))) {
         goto fail;
     }
 
     if (!cio_hash_set_add(el->fd_set, fd_ctx)) {
-        ecode = CIO_ALLOC_ERROR;
+        cio_ecode = CIO_ALLOC_ERROR;
         goto fail;
     }
 
@@ -290,8 +287,8 @@ static void add_fd_impl(void *ctx)
     return;
 
 fail:
-     if (ecode)
-        cio_perror(ecode, "add_fd_impl");
+     if (cio_ecode)
+        cio_perror(cio_ecode, "add_fd_impl");
 
     free(actx);
     free(fd_ctx);
@@ -318,15 +315,15 @@ static void remove_fd_impl(void *ctx)
     struct add_remove_ctx *actx = (struct add_remove_ctx *) ctx;
     struct event_loop *el = (struct event_loop *) actx->loop;
     struct user_fd_cb_ctx *fd_ctx = NULL, search_fd_ctx;
-    int ecode = 0;
+    int cio_ecode = 0;
 
     search_fd_ctx.fd = actx->fd;
     if (!(fd_ctx = cio_hash_set_remove(el->fd_set, &search_fd_ctx))) {
-        ecode = CIO_NOT_FOUND_ERROR;
+        cio_ecode = CIO_NOT_FOUND_ERROR;
         goto fail;
     }
 
-    if ((ecode = cio_pollset_remove(el->pollset, actx->fd)))
+    if ((cio_ecode = cio_pollset_remove(el->pollset, actx->fd)))
         goto fail;
 
     free(fd_ctx);
@@ -335,7 +332,7 @@ static void remove_fd_impl(void *ctx)
     return;
 
 fail:
-    cio_perror(ecode, "remove_fd_impl");
+    cio_perror(cio_ecode, "remove_fd_impl");
     free(fd_ctx);
     free(actx);
 }
@@ -359,6 +356,7 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
     struct timer_cb_ctx *ta, *prev_ta;
     struct timer_cb_ctx *timer_ctx;
     struct timeval tv;
+    int ecode = 0;
 
     if (gettimeofday(&tv, NULL))
         goto fail;
@@ -371,8 +369,10 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
     timer_ctx->due_time = time_ms(&tv) + timeout_ms;
     timer_ctx->next = NULL;
 
-    if (pthread_mutex_lock(&el->mutex))
+    if ((ecode = pthread_mutex_lock(&el->mutex))) {
+        errno = ecode;
         goto fail;
+    }
 
     ta = prev_ta = el->timer_actions;
     while (ta && ta->due_time < timer_ctx->due_time) {
@@ -387,8 +387,10 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
         el->timer_actions = timer_ctx;
     }
 
-    if (pthread_mutex_unlock(&el->mutex))
+    if ((ecode = pthread_mutex_unlock(&el->mutex))) {
+        errno = ecode;
         goto fail;
+    }
 
     return send_pipe_event(loop, WAKE_UP);
 

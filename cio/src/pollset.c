@@ -63,15 +63,19 @@ static int pollset_add(void *pollset, int fd, int flags)
         if (ps->pollfds == NULL)
             return CIO_ALLOC_ERROR;
     }
+
     ps->pollfds[unreserved_index].fd = fd;
     ps->pollfds[unreserved_index].revents = 0;
+
     if (flags & CIO_FLAG_IN)
         ps->pollfds[unreserved_index].events = POLLIN;
     if (flags & CIO_FLAG_OUT)
         ps->pollfds[unreserved_index].events |= POLLOUT;
+
 #if defined (_GNU_SOURCE)
     ps->pollfds[unreserved_index].events |= POLLRDHUP;
 #endif
+
     ps->used++;
     if (unreserved_index == ps->size)
         ps->size++;
@@ -105,13 +109,13 @@ static int pollset_size(void *pollset)
 static int pollset_poll(void *pollset, int timeout_ms, void *cb_ctx, pollset_cb_t cb)
 {
     struct pollset *ps = (struct pollset *)pollset;
-    int result, i, flags;
+    int ecode, i, flags;
 
-    result = poll(ps->pollfds, ps->size, timeout_ms);
-    if (result == -1) {
+    ecode = poll(ps->pollfds, ps->size, timeout_ms);
+    if (ecode == -1) {
         perror("poll");
         return -1;
-    } else if (result == 0) {
+    } else if (ecode == 0) {
         return 0;
     } else {
         for (i = 0; i < ps->size; ++i) {
@@ -136,7 +140,7 @@ static int pollset_poll(void *pollset, int timeout_ms, void *cb_ctx, pollset_cb_
         }
     }
 
-    return result;
+    return ecode;
 }
 
 #else
