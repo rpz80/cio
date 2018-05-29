@@ -326,13 +326,12 @@ static void remove_fd_impl(void *ctx)
     if ((cio_ecode = cio_pollset_remove(el->pollset, actx->fd)))
         goto fail;
 
-    free(fd_ctx);
-    free(actx);
-
-    return;
+    goto finally;
 
 fail:
     cio_perror(cio_ecode, "remove_fd_impl");
+
+finally:
     free(fd_ctx);
     free(actx);
 }
