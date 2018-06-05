@@ -211,7 +211,14 @@ int cio_event_loop_run(void *loop)
         /* #TODO: move handler invocation out of mutex scope */
         tctx = el->timer_actions;
         while (tctx && tctx->due_time <= now_time_ms) {
+            if ((ecode = pthread_mutex_unlock(&el->mutex)))
+                goto fail;
+
             tctx->action(tctx->action_ctx);
+
+            if ((ecode = pthread_mutex_lock(&el->mutex)))
+                goto fail;
+
             prev_tctx = tctx;
             tctx = tctx->next;
             if (prev_tctx == el->timer_actions)

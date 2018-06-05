@@ -11,6 +11,7 @@ struct loop_ctx {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int cb_called;
+    int should_unsubscribe_from_cb;
     int test_pipe[2];
 };
 
@@ -32,6 +33,7 @@ int setup_event_loop_tests(void **ctx)
     lctx->cond = (pthread_cond_t) PTHREAD_COND_INITIALIZER;
     lctx->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
     lctx->cb_called = 0;
+    lctx->should_unsubscribe_from_cb = 0;
 
     ASSERT_EQ_INT(0, pipe(lctx->test_pipe));
 
@@ -79,17 +81,19 @@ fail:
     free(lctx);
     errno = ecode;
     perror("teardown_event_loop_tests");
+
+    return ecode;
 }
+
+/**************************************************************************************************/
 
 static const char send_buf[] = "hello";
 
 static void test_add_cb(void *ctx, int fd, int flags)
 {
-    struct loop_ctx *lctx;
+    struct loop_ctx *lctx = (struct loop_ctx *) ctx;
     char rcv_buf[128];
     int ecode = 0;
-
-    lctx = (struct loop_ctx *) ctx;
 
     ASSERT_TRUE(flags & CIO_FLAG_IN);
     ASSERT_EQ_INT(sizeof(send_buf), read(fd, rcv_buf, sizeof(rcv_buf)));
@@ -100,6 +104,11 @@ static void test_add_cb(void *ctx, int fd, int flags)
     lctx->cb_called = 1;
     if ((ecode = pthread_cond_signal(&lctx->cond)))
         goto fail;
+
+    if (lctx->should_unsubscribe_from_cb) {
+        cio_event_loop_remove_fd(lctx->loop, lctx->test_pipe[0]);
+        lctx->cb_called = 0;
+    }
 
     if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
         goto fail;
@@ -112,17 +121,41 @@ fail:
     pthread_mutex_unlock(&lctx->mutex);
 }
 
-void test_event_loop_add_fd(void **ctx)
+static void when_written_to_the_pipe(struct loop_ctx *lctx)
+{
+    ASSERT_LT_INT(0, write(lctx->test_pipe[1], send_buf, sizeof(send_buf)));
+}
+
+static void when_pipe_fd_added_to_loop(struct loop_ctx *lctx, int should_unsubscribe_from_cb)
+{
+
+    int ecode = cio_event_loop_add_fd(lctx->loop, lctx->test_pipe[0], CIO_FLAG_IN, lctx, test_add_cb);
+    ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
+}
+
+static void when_pipe_fd_removed_from_loop(struct loop_ctx *lctx)
+{
+    int ecode = cio_event_loop_remove_fd(lctx->loop, lctx->test_pipe[0]);
+    ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
+
+    if ((ecode = pthread_mutex_lock(&lctx->mutex)))
+        goto fail;
+
+    lctx->cb_called = 0;
+    if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
+        goto fail;
+
+    return;
+
+fail:
+    errno = ecode;
+    perror("assert_cb_not_called");
+    pthread_mutex_unlock(&lctx->mutex);
+}
+
+static void assert_cb_called(struct loop_ctx *lctx)
 {
     int ecode = 0;
-    struct loop_ctx *lctx;
-
-    lctx = (struct loop_ctx *) *ctx;
-
-    ASSERT_LT_INT(0, write(lctx->test_pipe[1], send_buf, sizeof(send_buf)));
-    
-    ecode = cio_event_loop_add_fd(lctx->loop, lctx->test_pipe[0], CIO_FLAG_IN, lctx, test_add_cb);
-    ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
 
     if ((ecode = pthread_mutex_lock(&lctx->mutex)))
         goto fail;
@@ -132,16 +165,65 @@ void test_event_loop_add_fd(void **ctx)
             goto fail;
     }
 
+    ASSERT_EQ_INT(1, lctx->cb_called);
+    lctx->cb_called = 0;
+
     if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
         goto fail;
 
-    ASSERT_EQ_INT(1, lctx->cb_called);
     return;
 
 fail:
     errno = ecode;
-    perror("test_event_loop_add_fd");
+    perror("assert_cb_called");
     pthread_mutex_unlock(&lctx->mutex);
 }
 
-/* #TODO: remove fd ut */
+static void assert_cb_not_called(struct loop_ctx *lctx)
+{
+    int ecode = 0;
+
+    if ((ecode = pthread_mutex_lock(&lctx->mutex)))
+        goto fail;
+
+    ASSERT_EQ_INT(0, lctx->cb_called);
+    if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
+        goto fail;
+
+    return;
+
+fail:
+    errno = ecode;
+    perror("assert_cb_not_called");
+    pthread_mutex_unlock(&lctx->mutex);
+}
+
+/**************************************************************************************************/
+
+void test_event_loop_add_remove(void **ctx)
+{
+    struct loop_ctx *lctx = (struct loop_ctx *) *ctx;
+
+    when_pipe_fd_added_to_loop(lctx, 0);
+    when_written_to_the_pipe(lctx);
+    assert_cb_called(lctx);
+
+    when_pipe_fd_removed_from_loop(lctx);
+    when_written_to_the_pipe(lctx);
+    assert_cb_not_called(lctx);
+}
+
+void test_event_loop_add_remove_from_cb(void **ctx)
+{
+    struct loop_ctx *lctx = (struct loop_ctx *) *ctx;
+
+    when_pipe_fd_added_to_loop(lctx, 1);
+    when_written_to_the_pipe(lctx);
+    assert_cb_called(lctx);
+
+    when_written_to_the_pipe(lctx);
+    assert_cb_not_called(lctx);
+}
+
+/* #TODO: remove/add fd  from cb ut */
+/* #TODO: timer function ut */
