@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <errno.h>
+#include <assert.h>
 
 struct loop_ctx {
     void *loop;
@@ -89,7 +90,7 @@ fail:
 
 static const char send_buf[] = "hello";
 
-static void test_add_cb(void *ctx, int fd, int flags)
+static void test_pipe_cb(void *ctx, int fd, int flags)
 {
     struct loop_ctx *lctx = (struct loop_ctx *) ctx;
     char rcv_buf[128];
@@ -101,14 +102,14 @@ static void test_add_cb(void *ctx, int fd, int flags)
     if ((ecode = pthread_mutex_lock(&lctx->mutex)))
         goto fail;
 
-    lctx->cb_called = 1;
+    assert(lctx->cb_called == 0);
+    lctx->cb_called += 1;
+
     if ((ecode = pthread_cond_signal(&lctx->cond)))
         goto fail;
 
-    if (lctx->should_unsubscribe_from_cb) {
+    if (lctx->should_unsubscribe_from_cb)
         cio_event_loop_remove_fd(lctx->loop, lctx->test_pipe[0]);
-        lctx->cb_called = 0;
-    }
 
     if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
         goto fail;
@@ -117,7 +118,7 @@ static void test_add_cb(void *ctx, int fd, int flags)
 
 fail:
     errno = ecode;
-    perror("test_add_cb");
+    perror("test_pipe_cb");
     pthread_mutex_unlock(&lctx->mutex);
 }
 
@@ -128,8 +129,8 @@ static void when_written_to_the_pipe(struct loop_ctx *lctx)
 
 static void when_pipe_fd_added_to_loop(struct loop_ctx *lctx, int should_unsubscribe_from_cb)
 {
-
-    int ecode = cio_event_loop_add_fd(lctx->loop, lctx->test_pipe[0], CIO_FLAG_IN, lctx, test_add_cb);
+    lctx->should_unsubscribe_from_cb = should_unsubscribe_from_cb;
+    int ecode = cio_event_loop_add_fd(lctx->loop, lctx->test_pipe[0], CIO_FLAG_IN, lctx, test_pipe_cb);
     ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
 }
 
@@ -141,7 +142,6 @@ static void when_pipe_fd_removed_from_loop(struct loop_ctx *lctx)
     if ((ecode = pthread_mutex_lock(&lctx->mutex)))
         goto fail;
 
-    lctx->cb_called = 0;
     if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
         goto fail;
 
@@ -149,7 +149,7 @@ static void when_pipe_fd_removed_from_loop(struct loop_ctx *lctx)
 
 fail:
     errno = ecode;
-    perror("assert_cb_not_called");
+    perror("when_pipe_fd_removed_from_loop");
     pthread_mutex_unlock(&lctx->mutex);
 }
 
@@ -166,7 +166,6 @@ static void assert_cb_called(struct loop_ctx *lctx)
     }
 
     ASSERT_EQ_INT(1, lctx->cb_called);
-    lctx->cb_called = 0;
 
     if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
         goto fail;
@@ -186,7 +185,7 @@ static void assert_cb_not_called(struct loop_ctx *lctx)
     if ((ecode = pthread_mutex_lock(&lctx->mutex)))
         goto fail;
 
-    ASSERT_EQ_INT(0, lctx->cb_called);
+    ASSERT_EQ_INT(1, lctx->cb_called);
     if ((ecode = pthread_mutex_unlock(&lctx->mutex)))
         goto fail;
 
@@ -209,6 +208,7 @@ void test_event_loop_add_remove(void **ctx)
     assert_cb_called(lctx);
 
     when_pipe_fd_removed_from_loop(lctx);
+    usleep(5* 1000);
     when_written_to_the_pipe(lctx);
     assert_cb_not_called(lctx);
 }
