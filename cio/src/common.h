@@ -3,6 +3,9 @@
 
 #include <sys/time.h>
 
+#define CIO_MIN(a, b) ((a) < (b) ? (a) : (b))
+#define CIO_MAX(a, b) ((a) > (b) ? (a) : (b))
+
 enum CIO_ERROR {
     CIO_NO_ERROR,
     CIO_UNKNOWN_ERROR,
@@ -29,6 +32,6 @@ enum CIO_FLAGS {
 
 typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
 
-int time_ms(struct timeval *tv);
+long long time_ms(struct timeval *tv);
 
 #endif

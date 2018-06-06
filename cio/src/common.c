@@ -25,7 +25,7 @@ void cio_perror(enum CIO_ERROR error, const char *message)
 #undef PRINT_ERROR
 }
 
-int time_ms(struct timeval *tv)
+long long time_ms(struct timeval *tv)
 {
-    return tv->tv_sec*1000 + tv->tv_usec/1000;
+    return (long long) tv->tv_sec*1000 + tv->tv_usec/1000;
 }

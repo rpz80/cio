@@ -19,7 +19,7 @@ struct user_fd_cb_ctx {
 struct timer_cb_ctx {
     void (*action)(void *);
     void *action_ctx;
-    int due_time;
+    long long due_time;
     struct timer_cb_ctx *next;
 };
 
@@ -27,6 +27,7 @@ struct event_loop {
     void *pollset;
     void *fd_set;
     int need_stop;
+    int poll_timeout_ms;
     int event_pipe[2];
     struct timer_cb_ctx* timer_actions;
     pthread_mutex_t mutex;
@@ -85,6 +86,7 @@ void *cio_new_event_loop(int expected_capacity)
     el->need_stop = 0;
     el->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
     el->timer_actions = NULL;
+    el->poll_timeout_ms = -1;
 
     el->fd_set = cio_new_hash_set(expected_capacity / 0.75, user_fd_cb_ctx_cmp,
         user_fd_cb_ctx_hash_data, user_fd_cb_ctx_release);
@@ -186,31 +188,41 @@ fail:
         perror("pollset_cb");
 }
 
+static long long now_time_ms()
+{
+    struct timeval tv;
+
+    if (gettimeofday(&tv, NULL) < 0)
+        goto fail;
+
+    return time_ms(&tv);
+
+fail:
+    perror("now_time_ms");
+    return -1LL;
+}
+
 int cio_event_loop_run(void *loop)
 {
     struct event_loop *el = (struct event_loop *) loop;
     int ecode = 0, cio_ecode = 0;
-    int now_time_ms;
-    struct timeval tv;
+    int poll_timeout_ms = -1;
+    long long now;
     struct timer_cb_ctx *tctx, *prev_tctx;
 
     do {
-        if ((cio_ecode = cio_pollset_poll(el->pollset, -1, el, pollset_cb)) == -1)
+        if ((cio_ecode = cio_pollset_poll(el->pollset, poll_timeout_ms, el, pollset_cb)) == -1)
             goto fail;
 
         if (el->need_stop)
             break;
 
-        if (gettimeofday(&tv, NULL) < 0)
-            goto fail;
-
-        now_time_ms = time_ms(&tv);
         if ((ecode = pthread_mutex_lock(&el->mutex)))
             goto fail;
 
-        /* #TODO: move handler invocation out of mutex scope */
+        now = now_time_ms();
         tctx = el->timer_actions;
-        while (tctx && tctx->due_time <= now_time_ms) {
+        while (tctx && tctx->due_time <= now) {
             if ((ecode = pthread_mutex_unlock(&el->mutex)))
                 goto fail;
 
@@ -226,9 +238,13 @@ int cio_event_loop_run(void *loop)
             free(prev_tctx);
         }
 
+        if (tctx)
+            poll_timeout_ms = CIO_MAX(tctx->due_time - now_time_ms(), 0);
+        else
+            poll_timeout_ms = -1;
+
         if ((ecode = pthread_mutex_unlock(&el->mutex)))
             goto fail;
-
     } while (1);
 
     return CIO_NO_ERROR;
@@ -361,18 +377,14 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
     struct event_loop *el = (struct event_loop *) loop;
     struct timer_cb_ctx *ta, *prev_ta;
     struct timer_cb_ctx *timer_ctx;
-    struct timeval tv;
     int ecode = 0;
-
-    if (gettimeofday(&tv, NULL))
-        goto fail;
 
     if (!(timer_ctx = malloc(sizeof(*timer_ctx))))
         goto fail;
 
     timer_ctx->action = cb;
     timer_ctx->action_ctx = cb_ctx;
-    timer_ctx->due_time = time_ms(&tv) + timeout_ms;
+    timer_ctx->due_time = now_time_ms() + timeout_ms;
     timer_ctx->next = NULL;
 
     if ((ecode = pthread_mutex_lock(&el->mutex))) {
@@ -380,18 +392,22 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
         goto fail;
     }
 
-    ta = prev_ta = el->timer_actions;
-    while (ta && ta->due_time < timer_ctx->due_time) {
+    prev_ta = NULL;
+    ta = el->timer_actions;
+    while (ta) {
+        if (ta->due_time > timer_ctx->due_time) {
+            break;
+        }
         prev_ta = ta;
         ta = ta->next;
     }
 
-    if (prev_ta) {
+    if (prev_ta)
         prev_ta->next = timer_ctx;
-        timer_ctx->next = ta;
-    } else {
+    else
         el->timer_actions = timer_ctx;
-    }
+
+    timer_ctx->next = ta;
 
     if ((ecode = pthread_mutex_unlock(&el->mutex))) {
         errno = ecode;
@@ -402,6 +418,7 @@ int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb
 
 fail:
     pthread_mutex_unlock(&el->mutex);
+    free(timer_ctx);
     perror("cio_event_loop_add_timer");
     return errno;
 }

@@ -18,7 +18,8 @@ int main(int argc, char *argv[])
 
     struct ct_ut event_loop_tests[] = {
         TEST(test_event_loop_add_remove),
-        TEST(test_event_loop_add_remove_from_cb)
+        TEST(test_event_loop_add_remove_from_cb),
+        TEST(test_event_loop_timers)
     };
 
     struct ct_ut hash_set_tests[] = {
