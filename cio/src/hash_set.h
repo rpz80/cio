@@ -30,4 +30,4 @@ void *cio_hash_set_get(void *set, const void *elem);
  */
 void *cio_hash_set_remove(void *set, void *elem);
 
-#endif // CIO_HASH_SET_H
+#endif /* CIO_HASH_SET_H */

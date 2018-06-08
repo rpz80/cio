@@ -14,7 +14,7 @@ externalproject_add(
 
 include_directories("${CMAKE_SOURCE_DIR}/cio/src" "${CMAKE_SOURCE_DIR}/test/3rdparty/ct/src")
 
-file(GLOB TEST_SRC "src/*.c" "src/*.h")
+file(GLOB_RECURSE TEST_SRC "src/*.c" "src/*.h")
 add_executable(cio_test ${TEST_SRC})
 find_package(Threads)
 target_link_libraries(

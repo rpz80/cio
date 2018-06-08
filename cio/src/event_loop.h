@@ -12,5 +12,5 @@ int cio_event_loop_add_fd(void *loop, int fd, int flags, void *cb_ctx, pollset_c
 int cio_event_loop_remove_fd(void *loop, int fd);
 int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *));
 
-#endif // CIO_EVENT_LOOP_H
+#endif /* CIO_EVENT_LOOP_H */
 

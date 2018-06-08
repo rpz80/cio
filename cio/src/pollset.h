@@ -14,4 +14,4 @@ int cio_pollset_size(void *pollset);
  */
 int cio_pollset_poll(void *pollset, int timeout_ms, void *cb_ctx, pollset_cb_t cb);
 
-#endif // CIO_POLLSET_H
+#endif /* CIO_POLLSET_H */

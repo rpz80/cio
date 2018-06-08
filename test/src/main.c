@@ -2,6 +2,7 @@
 #include "event_loop_ut.h"
 #include "int_hash_set_ut.h"
 #include "struct_hash_set_ut.h"
+#include "tcp_server_client_ut.h"
 #include <ct.h>
 
 int main(int argc, char *argv[])
@@ -19,7 +20,11 @@ int main(int argc, char *argv[])
     struct ct_ut event_loop_tests[] = {
         TEST(test_event_loop_add_remove),
         TEST(test_event_loop_add_remove_from_cb),
-        TEST(test_event_loop_timers)
+        TEST(test_event_loop_timers),
+    };
+
+    struct ct_ut tcp_server_client_tests[] = {
+        TEST(test_tcp_server_client)
     };
 
     struct ct_ut hash_set_tests[] = {
@@ -34,6 +39,8 @@ int main(int argc, char *argv[])
     result = RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);
     result |= RUN_TESTS(event_loop_tests, setup_event_loop_tests, teardown_event_loop_tests);
     result |= RUN_TESTS(hash_set_tests, NULL, NULL);
+    result |= RUN_TESTS(tcp_server_client_tests, setup_tcp_server_client_tests,
+        teardown_tcp_server_client_tests);
 
     return result;
 }
