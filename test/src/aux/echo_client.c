@@ -15,16 +15,19 @@ struct client_ctx {
 
 static const char *const send_buf_prefix = "hello from ";
 
-void *new_echo_client(void *event_loop, int send_count)
+void *new_echo_client(void *event_loop, int send_count, const char *addr_string, int port)
 {
     struct client_ctx *cctx;
-    int fd;
+    int fd, addrlen;
+    struct sockaddr sock_addr;
 
     cctx = malloc(sizeof(*cctx));
     ASSERT_NE_PTR(NULL, cctx);
 
-    fd = cio_resolve();
-    cctx->tcp_client = cio_new_tcp_client(event_loop, cctx);
+    fd = cio_resolve(addr_string, port, AF_INET, &sock_addr, &addrlen);
+    ASSERT_NE_INT(-1, fd);
+
+    cctx->tcp_client = cio_new_tcp_client(event_loop, cctx, fd, &sock_addr, addrlen);
     ASSERT_NE_PTR(NULL, cctx->tcp_client);
     cctx->received_count = 0;
     cctx->send_count = send_count;
@@ -58,10 +61,10 @@ static void on_connect(void *ctx, int ecode)
     cio_tcp_client_async_write(cctx->tcp_client, cctx->send_buf, strlen(cctx->send_buf), on_write);
 }
 
-void echo_client_start(void *echo_client, const char *addr, int port)
+void echo_client_start(void *echo_client)
 {
     struct client_ctx *cctx = echo_client;
 
-    cio_tcp_client_async_connect(cctx->tcp_client, addr, port, on_connect);
+    cio_tcp_client_async_connect(cctx->tcp_client, on_connect);
 }
 

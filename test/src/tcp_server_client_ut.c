@@ -15,6 +15,9 @@ struct test_ctx {
     void *server_event_loop;
 };
 
+static const char *const HOST = "127.0.0.1";
+static const int PORT = 54100;
+
 int setup_tcp_server_client_tests(void **ctx)
 {
     struct test_ctx *tctx = malloc(sizeof(struct test_ctx));
@@ -32,7 +35,7 @@ int setup_tcp_server_client_tests(void **ctx)
     ASSERT_NE_PTR(NULL, tctx->clients);
 
     for (i = 0; i < tctx->client_count; ++i) {
-        tctx->clients[i] = new_echo_client(tctx->clients_event_loop, tctx->send_count);
+        tctx->clients[i] = new_echo_client(tctx->clients_event_loop, tctx->send_count, HOST, PORT);
         ASSERT_NE_PTR(NULL, tctx->clients[i]);
     }
 
