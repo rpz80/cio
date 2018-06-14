@@ -1,9 +1,11 @@
 #include "echo_client.h"
+#include "common.h"
 #include <tcp_client.h>
 #include <event_loop.h>
 #include <resolv.h>
 #include <ct.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct client_ctx {
     void *tcp_client;
@@ -55,7 +57,7 @@ static void on_connect(void *ctx, int ecode)
     ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
     fprintf(stdout, "client %p connected\n", cctx->tcp_client);
 
-    strncpy(cctx->send_buf, send_buf_prefix, strlen(send_buf_prefix));
+    strncpy(cctx->send_buf, send_buf_prefix, sizeof(cctx->send_buf) - 1);
     snprintf(cctx->send_buf + strlen(cctx->send_buf),
         sizeof(cctx->send_buf) - strlen(cctx->send_buf), "%p\n", cctx->tcp_client);
     cio_tcp_client_async_write(cctx->tcp_client, cctx->send_buf, strlen(cctx->send_buf), on_write);

@@ -31,6 +31,7 @@ struct event_loop {
     int event_pipe[2];
     struct timer_cb_ctx* timer_actions;
     pthread_mutex_t mutex;
+    pthread_t self_id;
 };
 
 enum event_code {
@@ -87,6 +88,7 @@ void *cio_new_event_loop(int expected_capacity)
     el->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
     el->timer_actions = NULL;
     el->poll_timeout_ms = -1;
+    memset(&el->self_id, 0, sizeof(el->self_id));
 
     el->fd_set = cio_new_hash_set(expected_capacity / 0.75, user_fd_cb_ctx_cmp,
         user_fd_cb_ctx_hash_data, user_fd_cb_ctx_release);
@@ -210,6 +212,7 @@ int cio_event_loop_run(void *loop)
     long long now;
     struct timer_cb_ctx *tctx, *prev_tctx;
 
+    el->self_id = pthread_self();
     do {
         if ((cio_ecode = cio_pollset_poll(el->pollset, poll_timeout_ms, el, pollset_cb)) == -1)
             goto fail;
@@ -374,11 +377,15 @@ int cio_event_loop_remove_fd(void *loop, int fd)
 
 int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *))
 {
-    /* TODO: introduce dispatch() */
     struct event_loop *el = (struct event_loop *) loop;
     struct timer_cb_ctx *ta, *prev_ta;
     struct timer_cb_ctx *timer_ctx;
     int ecode = 0;
+
+    if (timeout_ms == 0 && pthread_self() == el->self_id) {
+        cb(cb_ctx);
+        return 0;
+    }
 
     if (!(timer_ctx = malloc(sizeof(*timer_ctx))))
         goto fail;

@@ -10,6 +10,11 @@ int cio_event_loop_run(void *loop);
 int cio_event_loop_stop(void *loop);
 int cio_event_loop_add_fd(void *loop, int fd, int flags, void *cb_ctx, pollset_cb_t cb);
 int cio_event_loop_remove_fd(void *loop, int fd);
+
+/**
+ * If timeout_ms == 0 && thread_id of the caller == thread_id of the event_loop thread id, then
+ * cb is called in-place.
+ */
 int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *));
 
 #endif /* CIO_EVENT_LOOP_H */

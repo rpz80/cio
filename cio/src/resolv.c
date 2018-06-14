@@ -2,9 +2,67 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/un.h>
+#include <netdb.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+struct resolver_ctx {
+    struct addrinfo *root;
+    struct addrinfo *current;
+};
+
+void *cio_new_resolver(const char *addr_string, int port, enum CIO_FAMILY family,
+    enum CIO_ROLE role, int sock_type)
+{
+    struct resolver_ctx *rctx;
+    char port_buf[16];
+    struct addrinfo hints;
+    struct sockaddr_un un_addr;
+
+    rctx = malloc(sizeof(*rctx));
+    if (!rctx)
+        goto fail;
+
+    if (port < 0 || port > 65535)
+        goto fail;
+
+    rctx->current = NULL;
+    rctx->root = NULL;
+    snprintf(port_buf, "%d", port);
+
+    switch (family) {
+    case CIO_INET:
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = 0;
+        hints.ai_protocol = 0;
+        break;
+
+    case CIO_UNIX:
+        memset(&un_addr, 0, sizeof(un_addr));
+
+        break;
+    }
+
+    return rctx;
+
+fail:
+    free(rctx);
+    perror("cio_new_resolver");
+
+    return NULL;
+}
+
+void cio_free_resolver(void *resolver)
+{
+
+}
+
+/**
+ * addr and addrlen - out parameters.
+ */
+int cio_resolver_next_endpoint(void *resolver, struct sockaddr **addr, int *addrlen);
 
 int cio_resolve(const char *addr_string, int port, int family, struct sockaddr *addr, int *addrlen)
 {
