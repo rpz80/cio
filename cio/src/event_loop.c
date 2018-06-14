@@ -374,6 +374,7 @@ int cio_event_loop_remove_fd(void *loop, int fd)
 
 int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *))
 {
+    /* TODO: introduce dispatch() */
     struct event_loop *el = (struct event_loop *) loop;
     struct timer_cb_ctx *ta, *prev_ta;
     struct timer_cb_ctx *timer_ctx;
