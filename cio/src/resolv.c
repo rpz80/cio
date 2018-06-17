@@ -6,14 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
 
 struct resolver_ctx {
     struct addrinfo *root;
     struct addrinfo *current;
 };
 
-void *cio_new_resolver(const char *addr_string, int port, enum CIO_FAMILY family,
-    enum CIO_ROLE role, int sock_type)
+void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_ROLE role)
 {
     struct resolver_ctx *rctx;
     char port_buf[16];
@@ -29,18 +29,48 @@ void *cio_new_resolver(const char *addr_string, int port, enum CIO_FAMILY family
 
     rctx->current = NULL;
     rctx->root = NULL;
-    snprintf(port_buf, "%d", port);
+    snprintf(port_buf, sizeof(port_buf), "%d", port);
 
     switch (family) {
-    case CIO_INET:
+    case AF_INET:
+    case AF_INET6:
         memset(&hints, 0, sizeof(hints));
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = 0;
         hints.ai_protocol = 0;
+
+        if (role == CIO_SERVER) {
+            hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
+        } else if (role == CIO_CLIENT) {
+            hints.ai_flags = AI_ADDRCONFIG;
+        } else {
+            assert(0);
+        }
+
+        if (getaddrinfo(addr_string, port_buf, &hints, &rctx->root))
+            goto fail;
+
+        rctx->current = rctx->root;
         break;
 
     case CIO_UNIX:
         memset(&un_addr, 0, sizeof(un_addr));
+        strncpy(un_addr.sun_path, addr_string, sizeof(un_addr.sun_path) - 1);
+
+        rctx->root = malloc(sizeof(*rctx->root));
+        if (!rctx->root)
+            goto fail;
+
+        memset(rctx->root, 0, sizeof(*rctx->root));
+
+        rctx->root->ai_addr = malloc(sizeof(*rctx->root->ai_addr));
+        if (!rctx->root->ai_addr) {
+            free(rctx->root);
+            goto fail;
+        }
+
+        memcpy(rctx->root->ai_addr, &un_addr, sizeof(un_addr));
+        rctx->root->ai_addrlen = sizeof(un_addr);
 
         break;
     }
@@ -56,15 +86,33 @@ fail:
 
 void cio_free_resolver(void *resolver)
 {
+    struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
 
+    if (rctx->root)
+        freeaddrinfo(rctx->root);
+
+    free(rctx);
 }
 
-/**
- * addr and addrlen - out parameters.
- */
-int cio_resolver_next_endpoint(void *resolver, struct sockaddr **addr, int *addrlen);
+int cio_resolver_next_endpoint(void *resolver, struct sockaddr *addr, int *addrlen)
+{
+    struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
 
-int cio_resolve(const char *addr_string, int port, int family, struct sockaddr *addr, int *addrlen)
+     if (rctx->current) {
+         memcpy(addr, rctx->current->ai_addr, sizeof(*addr));
+         *addrlen = rctx->current->ai_addrlen;
+         rctx->current = rctx->current->ai_next;
+     }
+}
+
+void cio_resolver_reset_endpoint_iterator(void *resolver)
+{
+    struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
+    rctx->current = rctx->root;
+}
+
+int cio_resolve_local(const char *addr_string, int port, int family, struct sockaddr *addr,
+    int *addrlen)
 {
     struct sockaddr_in ipv4_addr;
     struct sockaddr_in6 ipv6_addr;
