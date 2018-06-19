@@ -6,9 +6,12 @@
 #include <ct.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 struct client_ctx {
     void *tcp_client;
+    void *resolver;
     char send_buf[512];
     char rcv_buf[512];
     int send_count; /* -1 for infinite loop */
@@ -26,7 +29,12 @@ void *new_echo_client(void *event_loop, int send_count, const char *addr_string,
     cctx = malloc(sizeof(*cctx));
     ASSERT_NE_PTR(NULL, cctx);
 
-    fd = cio_resolve(addr_string, port, AF_INET, &sock_addr, &addrlen);
+    cctx->resolver = cio_new_resolver(addr_string, port, AF_UNSPEC, SOCK_STREAM, CIO_CLIENT);
+    ASSERT_NE_PTR(NULL, cctx->resolver);
+
+    ASSERT_EQ_INT(CIO_NO_ERROR, cio_resolver_next_endpoint(cctx->resolver, &sock_addr, &addrlen));
+
+    fd = socket(sock_addr.sa_family, SOCK_STREAM, 0);
     ASSERT_NE_INT(-1, fd);
 
     cctx->tcp_client = cio_new_tcp_client(event_loop, cctx, fd, &sock_addr, addrlen);
@@ -42,6 +50,7 @@ void free_echo_client(void *echo_client)
     struct client_ctx *cctx = echo_client;
 
     cio_free_tcp_client(cctx->tcp_client);
+    cio_free_resolver(cctx->resolver);
     free(cctx);
 }
 

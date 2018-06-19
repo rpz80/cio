@@ -10,9 +10,11 @@ enum CIO_ROLE {
 };
 
 /**
- * family - AF_INET, AF_INET6, AF_UNIX.
+ * family - AF_INET, AF_INET6, AF_UNIX, AF_UNSPEC (if AF_INET and AF_INET6 both will do).
+ * socktype - SOCK_STREAM, SOCK_DGRAM, 0 - for both
  */
-void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_ROLE role);
+void *cio_new_resolver(const char *addr_string, int port, int family, int socktype,
+    enum CIO_ROLE role);
 
 void cio_free_resolver(void *resolver);
 
@@ -24,7 +26,8 @@ void cio_resolver_reset_endpoint_iterator(void *resolver);
 
 
 /**
- * Resolve add_string with ipv4(6) address string locally, without DNS lookup.
+ * Resolve add_string with ipv4(6) address string locally, without DNS lookup. Creates and returns
+ * socket in case of success, -1 otherwise.
  */
 int cio_resolve_local(const char *addr_string, int port, int family, struct sockaddr *addr,
     int *addrlen);

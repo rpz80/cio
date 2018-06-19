@@ -1,4 +1,5 @@
 #include "resolv.h"
+#include "common.h"
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/un.h>
@@ -6,14 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <assert.h>
 
 struct resolver_ctx {
     struct addrinfo *root;
     struct addrinfo *current;
+    int socktype;
 };
 
-void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_ROLE role)
+void *cio_new_resolver(const char *addr_string, int port, int family, int socktype,
+    enum CIO_ROLE role)
 {
     struct resolver_ctx *rctx;
     char port_buf[16];
@@ -29,14 +31,20 @@ void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_R
 
     rctx->current = NULL;
     rctx->root = NULL;
+    rctx->socktype = socktype;
+
     snprintf(port_buf, sizeof(port_buf), "%d", port);
+    memset(&hints, 0, sizeof(hints));
+
+    if (socktype != SOCK_STREAM && socktype != SOCK_DGRAM)
+        goto fail;
 
     switch (family) {
     case AF_INET:
     case AF_INET6:
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = 0;
+    case AF_UNSPEC:
+        hints.ai_family = family;
+        hints.ai_socktype = socktype;
         hints.ai_protocol = 0;
 
         if (role == CIO_SERVER) {
@@ -44,7 +52,7 @@ void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_R
         } else if (role == CIO_CLIENT) {
             hints.ai_flags = AI_ADDRCONFIG;
         } else {
-            assert(0);
+            goto fail;
         }
 
         if (getaddrinfo(addr_string, port_buf, &hints, &rctx->root))
@@ -53,7 +61,7 @@ void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_R
         rctx->current = rctx->root;
         break;
 
-    case CIO_UNIX:
+    case AF_UNIX:
         memset(&un_addr, 0, sizeof(un_addr));
         strncpy(un_addr.sun_path, addr_string, sizeof(un_addr.sun_path) - 1);
 
@@ -73,6 +81,9 @@ void *cio_new_resolver(const char *addr_string, int port, int family, enum CIO_R
         rctx->root->ai_addrlen = sizeof(un_addr);
 
         break;
+
+    default:
+        goto fail;
     }
 
     return rctx;
@@ -98,11 +109,17 @@ int cio_resolver_next_endpoint(void *resolver, struct sockaddr *addr, int *addrl
 {
     struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
 
-     if (rctx->current) {
-         memcpy(addr, rctx->current->ai_addr, sizeof(*addr));
-         *addrlen = rctx->current->ai_addrlen;
-         rctx->current = rctx->current->ai_next;
+     while (rctx->current) {
+        if (rctx->current->ai_socktype == rctx->socktype || rctx->socktype == 0) {
+            memcpy(addr, rctx->current->ai_addr, sizeof(*addr));
+            *addrlen = rctx->current->ai_addrlen;
+            rctx->current = rctx->current->ai_next;
+            return CIO_NO_ERROR;
+        }
+        rctx->current = rctx->current->ai_next;
      }
+
+     return CIO_NOT_FOUND_ERROR;
 }
 
 void cio_resolver_reset_endpoint_iterator(void *resolver)
