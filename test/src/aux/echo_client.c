@@ -11,7 +11,6 @@
 
 struct client_ctx {
     void *tcp_client;
-    void *resolver;
     char send_buf[512];
     char rcv_buf[512];
     int send_count; /* -1 for infinite loop */
@@ -23,21 +22,11 @@ static const char *const send_buf_prefix = "hello from ";
 void *new_echo_client(void *event_loop, int send_count, const char *addr_string, int port)
 {
     struct client_ctx *cctx;
-    int fd, addrlen;
-    struct sockaddr sock_addr;
 
     cctx = malloc(sizeof(*cctx));
     ASSERT_NE_PTR(NULL, cctx);
 
-    cctx->resolver = cio_new_resolver(addr_string, port, AF_UNSPEC, SOCK_STREAM, CIO_CLIENT);
-    ASSERT_NE_PTR(NULL, cctx->resolver);
-
-    ASSERT_EQ_INT(CIO_NO_ERROR, cio_resolver_next_endpoint(cctx->resolver, &sock_addr, &addrlen));
-
-    fd = socket(sock_addr.sa_family, SOCK_STREAM, 0);
-    ASSERT_NE_INT(-1, fd);
-
-    cctx->tcp_client = cio_new_tcp_client(event_loop, cctx, fd, &sock_addr, addrlen);
+    cctx->tcp_client = cio_new_tcp_client(event_loop, cctx);
     ASSERT_NE_PTR(NULL, cctx->tcp_client);
     cctx->received_count = 0;
     cctx->send_count = send_count;
@@ -50,7 +39,6 @@ void free_echo_client(void *echo_client)
     struct client_ctx *cctx = echo_client;
 
     cio_free_tcp_client(cctx->tcp_client);
-    cio_free_resolver(cctx->resolver);
     free(cctx);
 }
 
@@ -72,10 +60,10 @@ static void on_connect(void *ctx, int ecode)
     cio_tcp_client_async_write(cctx->tcp_client, cctx->send_buf, strlen(cctx->send_buf), on_write);
 }
 
-void echo_client_start(void *echo_client)
+void echo_client_start(void *echo_client, const char *addr, int port)
 {
     struct client_ctx *cctx = echo_client;
 
-    cio_tcp_client_async_connect(cctx->tcp_client, on_connect);
+    cio_tcp_client_async_connect(cctx->tcp_client, addr, port, on_connect);
 }
 

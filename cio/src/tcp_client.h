@@ -1,9 +1,6 @@
 #if !defined(CIO_TCP_CLIENT_H)
 #define CIO_TCP_CLIENT_H
 
-#include <sys/socket.h>
-#include <sys/types.h>
-
 /**
  * ctx - user-provided context. It will be passed to the async functions callbacks.
  */

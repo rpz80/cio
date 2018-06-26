@@ -3,7 +3,7 @@
 
 void *new_echo_client(void *event_loop, int send_count, const char *addr_string, int port);
 void free_echo_client(void *echo_client);
-void echo_client_start(void *echo_client);
+void echo_client_start(void *echo_client, const char *addr, int port);
 void echo_client_stop(void *echo_client);
 int echo_client_received_count(void *echo_client);
 

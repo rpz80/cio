@@ -15,6 +15,7 @@ enum CIO_ERROR {
     CIO_WRITE_ERROR,
     CIO_READ_ERROR,
     CIO_POLL_ERROR,
+    CIO_WRONG_STATE_ERROR,
     
     CIO_ERROR_COUNT
 };
@@ -34,4 +35,5 @@ typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
 
 long long time_ms(struct timeval *tv);
 
+int toggle_fd_nonblocking(int fd, int on);
 #endif

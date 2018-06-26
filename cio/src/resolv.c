@@ -1,9 +1,6 @@
 #include "resolv.h"
 #include "common.h"
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <sys/un.h>
-#include <netdb.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -46,14 +43,10 @@ void *cio_new_resolver(const char *addr_string, int port, int family, int sockty
         hints.ai_family = family;
         hints.ai_socktype = socktype;
         hints.ai_protocol = 0;
+        hints.ai_flags = AI_ADDRCONFIG | AI_NUMERICSERV;
 
-        if (role == CIO_SERVER) {
-            hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-        } else if (role == CIO_CLIENT) {
-            hints.ai_flags = AI_ADDRCONFIG;
-        } else {
-            goto fail;
-        }
+        if (role == CIO_SERVER)
+            hints.ai_flags = AI_PASSIVE;
 
         if (getaddrinfo(addr_string, port_buf, &hints, &rctx->root))
             goto fail;
@@ -97,7 +90,7 @@ fail:
 
 void cio_free_resolver(void *resolver)
 {
-    struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
+    struct resolver_ctx *rctx = resolver;
 
     if (rctx->root)
         freeaddrinfo(rctx->root);
@@ -105,14 +98,13 @@ void cio_free_resolver(void *resolver)
     free(rctx);
 }
 
-int cio_resolver_next_endpoint(void *resolver, struct sockaddr *addr, int *addrlen)
+int cio_resolver_next_endpoint(void *resolver, struct addrinfo *addr)
 {
     struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
 
      while (rctx->current) {
         if (rctx->current->ai_socktype == rctx->socktype || rctx->socktype == 0) {
-            memcpy(addr, rctx->current->ai_addr, sizeof(*addr));
-            *addrlen = rctx->current->ai_addrlen;
+            memcpy(addr, rctx->current, sizeof(*addr));
             rctx->current = rctx->current->ai_next;
             return CIO_NO_ERROR;
         }

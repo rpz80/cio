@@ -40,28 +40,6 @@ enum event_code {
     WAKE_UP
 };
 
-static int toggle_fd_blocking(int fd, int on)
-{
-    int flags;
-
-    if ((flags = fcntl(fd, F_GETFL) == -1))
-        goto fail;
-
-    if (on)
-        flags |= O_NONBLOCK;
-    else
-        flags &= ~O_NONBLOCK;
-
-    if ((fcntl(fd, F_SETFL, flags) == -1))
-        goto fail;
-
-    return CIO_NO_ERROR;
-
-fail:
-    perror("toggle_fd_blocking");
-    return errno;
-}
-
 static int user_fd_cb_ctx_cmp(const void *l, const void *r)
 {
     return ((struct user_fd_cb_ctx *) l)->fd == ((struct user_fd_cb_ctx *) r)->fd;
@@ -102,7 +80,7 @@ void *cio_new_event_loop(int expected_capacity)
     if (pipe(el->event_pipe))
         goto fail;
 
-    if (toggle_fd_blocking(el->event_pipe[0], 1))
+    if (toggle_fd_nonblocking(el->event_pipe[0], 1))
         goto fail;
 
     if ((ecode = cio_pollset_add(el->pollset, el->event_pipe[0], CIO_FLAG_IN)))
@@ -356,7 +334,8 @@ static void remove_fd_impl(void *ctx)
     goto finally;
 
 fail:
-    cio_perror(cio_ecode, "remove_fd_impl");
+    if (cio_ecode != CIO_NOT_FOUND_ERROR)
+        cio_perror(cio_ecode, "remove_fd_impl");
 
 finally:
     free(fd_ctx);

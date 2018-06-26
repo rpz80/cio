@@ -3,6 +3,9 @@
 
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 
 enum CIO_ROLE {
     CIO_CLIENT,
@@ -21,9 +24,8 @@ void cio_free_resolver(void *resolver);
 /**
  * addr and addrlen - out parameters.
  */
-int cio_resolver_next_endpoint(void *resolver, struct sockaddr *addr, int *addrlen);
+int cio_resolver_next_endpoint(void *resolver, struct addrinfo *addr);
 void cio_resolver_reset_endpoint_iterator(void *resolver);
-
 
 /**
  * Resolve add_string with ipv4(6) address string locally, without DNS lookup. Creates and returns
