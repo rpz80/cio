@@ -42,7 +42,7 @@ void free_echo_client(void *echo_client)
     free(cctx);
 }
 
-static void on_write(void *ctx, int ecode, int written)
+static void on_write(void *ctx, int ecode)
 {
 
 }

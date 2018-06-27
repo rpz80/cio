@@ -18,6 +18,13 @@ struct test_ctx {
 
 static const char *const HOST = "ya.ru";
 static const int PORT = 80;
+static const char *send_buf = " \
+    GET /index.html HTTP/1.1 \
+    User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT) \
+    Host: www.ya.ru \
+    Accept-Language: en-us \
+    Accept-Encoding: gzip, deflate \
+    Connection: Keep-Alive";
 
 static void *clients_event_loop_thread_func(void *ctx)
 {
@@ -64,13 +71,28 @@ int teardown_tcp_server_client_tests(void **ctx)
     return 0;
 }
 
+static void on_client_write(void *ctx, int ecode)
+{
+//    struct test_ctx *test_ctx = ctx;
+    switch (ecode) {
+    case CIO_NO_ERROR:
+        fprintf(stdout, "Written successfully\n");
+        break;
+    default:
+        fprintf(stdout, "Write error: %d\n", ecode);
+        break;
+    }
+}
+
 static void on_client_connect(void *ctx, int ecode)
 {
-    struct test_ctx *tctx = ctx;
+    struct test_ctx *test_ctx = ctx;
 
     switch (ecode) {
     case CIO_NO_ERROR:
         fprintf(stdout, "Connected\n");
+        cio_tcp_client_async_write(test_ctx->clients[0], send_buf, strlen(send_buf),
+            on_client_write);
         break;
     default:
         fprintf(stdout, "Connect failed\n");
