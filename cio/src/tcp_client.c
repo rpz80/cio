@@ -21,58 +21,58 @@ enum connection_state {
  * main context is destroyed in order not to crash on callback execution after tcp_client
  * destruction.
  */
-struct async_ctx {
-    void *ctx;
+struct wrapper_ctx {
+    void *posted_ctx;
     void (*on_destroy)(void *ctx);
-    struct async_ctx *next;
+    struct wrapper_ctx *next;
 };
 
-static void *new_async_ctx(struct async_ctx **root, void *ctx, void (*on_destroy)(void *ctx))
+static void *new_wrapper_ctx(struct wrapper_ctx **root, void *ctx, void (*on_destroy)(void *ctx))
 {
-    struct async_ctx *asctx;
-    struct async_ctx *cur = *root;
+    struct wrapper_ctx *new_wrapper_ctx;
+    struct wrapper_ctx *cur = *root;
 
-    asctx = malloc(sizeof(*asctx));
-    if (!asctx)
+    new_wrapper_ctx = malloc(sizeof(*new_wrapper_ctx));
+    if (!new_wrapper_ctx)
         return NULL;
 
-    asctx->ctx = ctx;
-    asctx->on_destroy = on_destroy;
-    asctx->next = NULL;
+    new_wrapper_ctx->posted_ctx = ctx;
+    new_wrapper_ctx->on_destroy = on_destroy;
+    new_wrapper_ctx->next = NULL;
 
     if (!*root) {
-        *root = asctx;
+        *root = new_wrapper_ctx;
     } else {
         while (cur->next) {
             cur = cur->next;
         }
-        cur->next = asctx;
+        cur->next = new_wrapper_ctx;
     }
 
-    return asctx;
+    return new_wrapper_ctx;
 }
 
-static void free_async_ctx(struct async_ctx *root)
+static void free_all_wrappers(struct wrapper_ctx *root_wrapper_ctx)
 {
-    struct async_ctx *cur = root;
+    struct wrapper_ctx *cur_wrapper_ctx = root_wrapper_ctx;
 
-    if (!root)
+    if (!root_wrapper_ctx)
         return;
 
-    while (root) {
-        cur = root;
-        root = root->next;
-        cur->on_destroy(cur->ctx);
-        free(cur);
+    while (root_wrapper_ctx) {
+        cur_wrapper_ctx = root_wrapper_ctx;
+        root_wrapper_ctx = root_wrapper_ctx->next;
+        cur_wrapper_ctx->on_destroy(cur_wrapper_ctx->posted_ctx);
+        free(cur_wrapper_ctx);
     }
 }
 
 struct tcp_client_ctx {
     void *event_loop;
-    void *ctx;
+    void *user_ctx;
     int fd;
     enum connection_state cstate;
-    struct async_ctx *asctx;
+    struct wrapper_ctx *wrapper_ctx;
 };
 
 void *cio_new_tcp_client(void *event_loop, void *ctx)
@@ -84,10 +84,10 @@ void *cio_new_tcp_client(void *event_loop, void *ctx)
         goto fail;
 
     tctx->event_loop = event_loop;
-    tctx->ctx = ctx;
+    tctx->user_ctx = ctx;
     tctx->fd = -1;
     tctx->cstate = CIO_CS_INITIAL;
-    tctx->asctx = NULL;
+    tctx->wrapper_ctx = NULL;
 
     return tctx;
 
@@ -99,16 +99,43 @@ fail:
 
 static void free_tcp_client_impl(void *ctx)
 {
-    struct tcp_client_ctx *tctx = ctx;
+    struct tcp_client_ctx *tcp_client_ctx = ctx;
 
-    free_async_ctx(tctx->asctx);
-    free(tctx);
+    free_all_wrappers(tcp_client_ctx->wrapper_ctx);
+    free(tcp_client_ctx);
 }
 
 void cio_free_tcp_client(void *tcp_client)
 {
     struct tcp_client_ctx *tctx = tcp_client;
     cio_event_loop_add_timer(tctx->event_loop, 0, tctx, free_tcp_client_impl);
+}
+
+static void tcp_client_remove_wrapper_by_posted_ctx(struct tcp_client_ctx *tcp_client_ctx,
+    void *posted_ctx)
+{
+    struct wrapper_ctx *wrapper_ctx, *tmp_wrapper_ctx;
+
+    if (!tcp_client_ctx)
+        return;
+
+    wrapper_ctx = tcp_client_ctx->wrapper_ctx;
+    tmp_wrapper_ctx = NULL;
+
+    while (wrapper_ctx) {
+        if (wrapper_ctx->posted_ctx == posted_ctx) {
+            if (tmp_wrapper_ctx) {
+                tmp_wrapper_ctx->next = wrapper_ctx->next;
+                free(wrapper_ctx);
+                break;
+            } else {
+                tcp_client_ctx->wrapper_ctx = wrapper_ctx->next;
+            }
+        } else {
+            tmp_wrapper_ctx = wrapper_ctx;
+            wrapper_ctx = wrapper_ctx->next;
+        }
+    }
 }
 
 struct connect_ctx {
@@ -122,123 +149,106 @@ static void free_connect_ctx(struct connect_ctx *cctx);
 
 static void connect_ctx_on_connect_cb(void *ctx, int fd, int flags)
 {
-    struct connect_ctx *cctx = ctx;
-    struct tcp_client_ctx *tctx = cctx->tcp_client;
+    struct connect_ctx *connect_ctx = ctx;
+    struct tcp_client_ctx *tcp_client_ctx = connect_ctx->tcp_client;
 
-    if (!tctx) {
-        free_connect_ctx(cctx);
+    if (!tcp_client_ctx) {
+        free_connect_ctx(connect_ctx);
         return;
     }
 
-    assert(fd == tctx->fd);
+    assert(fd == tcp_client_ctx->fd);
     if (flags & CIO_FLAG_OUT) {
-        cio_event_loop_remove_fd(tctx->event_loop, tctx->fd);
-        cctx->on_connect(tctx->ctx, CIO_NO_ERROR);
-        free_connect_ctx(cctx);
+        cio_event_loop_remove_fd(tcp_client_ctx->event_loop, tcp_client_ctx->fd);
+        connect_ctx->on_connect(tcp_client_ctx->user_ctx, CIO_NO_ERROR);
+        free_connect_ctx(connect_ctx);
         return;
     }
 
     fprintf(stdout, "on_connect_cb, error flags: %d\n", flags);
-    connect_ctx_try_next(cctx);
+    connect_ctx_try_next(connect_ctx);
 }
 
-static void free_connect_ctx(struct connect_ctx *cctx)
+static void free_connect_ctx(struct connect_ctx *connect_ctx)
 {
-    struct tcp_client_ctx *tctx = cctx->tcp_client;
-    struct async_ctx *asctx = tctx->asctx, *tmp_asctx = NULL;
+    struct tcp_client_ctx *tcp_client_ctx = connect_ctx->tcp_client;
 
-    if (tctx) {
-        while (asctx) {
-            if (asctx->ctx == cctx) {
-                if (tmp_asctx) {
-                    tmp_asctx->next = asctx->next;
-                    free(asctx);
-                    break;
-                } else {
-                    tctx->asctx = asctx->next;
-                }
-            } else {
-                tmp_asctx = asctx;
-                asctx = asctx->next;
-            }
-        }
-    }
-
-    cio_free_resolver(cctx->resolver);
-    free(cctx);
+    tcp_client_remove_wrapper_by_posted_ctx(tcp_client_ctx, connect_ctx);
+    cio_free_resolver(connect_ctx->resolver);
+    free(connect_ctx);
 }
 
 static void connect_ctx_on_destroy(void *ctx)
 {
-    struct connect_ctx *cctx = ctx;
-    cctx->tcp_client = NULL;
+    struct connect_ctx *connect_ctx = ctx;
+    connect_ctx->tcp_client = NULL;
 }
 
 static struct connect_ctx *new_connect_ctx(struct tcp_client_ctx *tcp_client, const char *addr,
     int port, void (*on_connect)(void *ctx, int ecode))
 {
-    struct connect_ctx *cctx;
+    struct connect_ctx *connect_ctx;
 
-    cctx = malloc(sizeof(*cctx));
-    if (!cctx)
+    connect_ctx = malloc(sizeof(*connect_ctx));
+    if (!connect_ctx)
         return NULL;
 
-    cctx->tcp_client = tcp_client;
-    cctx->on_connect = on_connect;
-    cctx->resolver = cio_new_resolver(addr, port, AF_UNSPEC, SOCK_STREAM,
+    connect_ctx->tcp_client = tcp_client;
+    connect_ctx->on_connect = on_connect;
+    connect_ctx->resolver = cio_new_resolver(addr, port, AF_UNSPEC, SOCK_STREAM,
         CIO_CLIENT);
-    if (!cctx->resolver) {
-        free(cctx);
+    if (!connect_ctx->resolver) {
+        free(connect_ctx);
         return NULL;
     }
 
-    if (!new_async_ctx(&tcp_client->asctx, cctx, connect_ctx_on_destroy)) {
-        free_connect_ctx(cctx);
+    if (!new_wrapper_ctx(&tcp_client->wrapper_ctx, connect_ctx, connect_ctx_on_destroy)) {
+        free_connect_ctx(connect_ctx);
         return NULL;
     }
 
-    return cctx;
+    return connect_ctx;
 }
 
-static void connect_ctx_try_next(struct connect_ctx *cctx)
+static void connect_ctx_try_next(struct connect_ctx *connect_ctx)
 {
     int cio_ecode = CIO_NO_ERROR;
     int system_ecode = 0;
-    struct tcp_client_ctx *tctx = cctx->tcp_client;
+    struct tcp_client_ctx *tcp_client_ctx = connect_ctx->tcp_client;
     struct addrinfo ainfo;
 
-    assert(tctx->cstate == CIO_CS_CONNECTING);
-    if ((cio_ecode = cio_resolver_next_endpoint(cctx->resolver, &ainfo)))
+    assert(tcp_client_ctx->cstate == CIO_CS_CONNECTING);
+    if ((cio_ecode = cio_resolver_next_endpoint(connect_ctx->resolver, &ainfo)))
         goto fail;
 
-    close(tctx->fd);
-    if ((tctx->fd = socket(ainfo.ai_family, ainfo.ai_socktype, 0)) == -1) {
+    close(tcp_client_ctx->fd);
+    if ((tcp_client_ctx->fd = socket(ainfo.ai_family, ainfo.ai_socktype, 0)) == -1) {
         system_ecode = errno;
         goto fail;
     }
 
-    if ((system_ecode = toggle_fd_nonblocking(tctx->fd, 1)))
+    if ((system_ecode = toggle_fd_nonblocking(tcp_client_ctx->fd, 1)))
         goto fail;
 
-    if (connect(tctx->fd, ainfo.ai_addr, ainfo.ai_addrlen))
+    if (connect(tcp_client_ctx->fd, ainfo.ai_addr, ainfo.ai_addrlen))
         system_ecode = errno;
 
     switch (system_ecode) {
     case 0:
-        tctx->cstate = CIO_CS_CONNECTED;
-        cctx->on_connect(tctx->ctx, CIO_NO_ERROR);
-        free_connect_ctx(cctx);
+        tcp_client_ctx->cstate = CIO_CS_CONNECTED;
+        connect_ctx->on_connect(tcp_client_ctx->user_ctx, CIO_NO_ERROR);
+        free_connect_ctx(connect_ctx);
         break;
     case EINPROGRESS:
-        cio_event_loop_remove_fd(tctx->event_loop, tctx->fd);
-        cio_ecode = cio_event_loop_add_fd(tctx->event_loop, tctx->fd, CIO_FLAG_OUT,
-            cctx, connect_ctx_on_connect_cb);
+        cio_event_loop_remove_fd(tcp_client_ctx->event_loop, tcp_client_ctx->fd);
+        cio_ecode = cio_event_loop_add_fd(tcp_client_ctx->event_loop, tcp_client_ctx->fd, CIO_FLAG_OUT,
+            connect_ctx, connect_ctx_on_connect_cb);
         if (cio_ecode)
             goto fail;
         break;
     default:
         perror("try_next_endpoint, connect");
-        connect_ctx_try_next(cctx);
+        connect_ctx_try_next(connect_ctx);
         break;
     }
 
@@ -250,51 +260,51 @@ fail:
     if (system_ecode)
         perror("try_next_endpoint");
 
-    tctx->cstate = CIO_CS_ERROR;
-    close(tctx->fd);
-    cctx->on_connect(tctx->ctx, cio_ecode ? cio_ecode : CIO_UNKNOWN_ERROR);
-    free_connect_ctx(cctx);
+    tcp_client_ctx->cstate = CIO_CS_ERROR;
+    close(tcp_client_ctx->fd);
+    connect_ctx->on_connect(tcp_client_ctx->user_ctx, cio_ecode ? cio_ecode : CIO_UNKNOWN_ERROR);
+    free_connect_ctx(connect_ctx);
 }
 
 static void async_connect_impl(void *ctx)
 {
-    struct connect_ctx *cctx = ctx;
-    struct tcp_client_ctx *tctx = cctx->tcp_client;
+    struct connect_ctx *connect_ctx = ctx;
+    struct tcp_client_ctx *tcp_client_ctx = connect_ctx->tcp_client;
 
-    if (!tctx) {
-        free_connect_ctx(cctx);
+    if (!tcp_client_ctx) {
+        free_connect_ctx(connect_ctx);
         return;
     }
 
-    switch (tctx->cstate) {
+    switch (tcp_client_ctx->cstate) {
     case CIO_CS_CONNECTED:
     case CIO_CS_CONNECTING:
-        cctx->on_connect(tctx->ctx, CIO_WRONG_STATE_ERROR);
-        free_connect_ctx(cctx);
+        connect_ctx->on_connect(tcp_client_ctx->user_ctx, CIO_WRONG_STATE_ERROR);
+        free_connect_ctx(connect_ctx);
         return;
     case CIO_CS_INITIAL:
     case CIO_CS_ERROR:
-        tctx->cstate = CIO_CS_CONNECTING;
+        tcp_client_ctx->cstate = CIO_CS_CONNECTING;
         break;
     default:
         assert(0);
     }
 
-    connect_ctx_try_next(cctx);
+    connect_ctx_try_next(connect_ctx);
 }
 
 void cio_tcp_client_async_connect(void *tcp_client, const char *addr, int port,
     void (*on_connect)(void *ctx, int ecode))
 {
-    struct connect_ctx *cctx = new_connect_ctx(tcp_client, addr, port, on_connect);
-    struct tcp_client_ctx *tctx = tcp_client;
+    struct connect_ctx *connect_ctx = new_connect_ctx(tcp_client, addr, port, on_connect);
+    struct tcp_client_ctx *tcp_client_ctx = tcp_client;
 
-    if (!cctx) {
+    if (!connect_ctx) {
         cio_perror(CIO_ALLOC_ERROR, "cio_tcp_client_async_connect");
-        on_connect(tctx->ctx, CIO_ALLOC_ERROR);
+        on_connect(tcp_client_ctx->user_ctx, CIO_ALLOC_ERROR);
     }
 
-    cio_event_loop_add_timer(tctx->event_loop, 0, cctx, async_connect_impl);
+    cio_event_loop_add_timer(tcp_client_ctx->event_loop, 0, connect_ctx, async_connect_impl);
 }
 
 struct write_ctx {
@@ -305,54 +315,89 @@ struct write_ctx {
     int written;
 };
 
+static void write_ctx_on_destroy(void *ctx)
+{
+    struct write_ctx *write_ctx = ctx;
+    write_ctx->tcp_client = NULL;
+}
+
+static void free_write_ctx(struct write_ctx *write_ctx)
+{
+    tcp_client_remove_wrapper_by_posted_ctx(write_ctx->tcp_client, write_ctx);
+    free(write_ctx);
+}
+
+struct write_ctx *new_write_ctx(struct tcp_client_ctx *tcp_client,
+    void (*on_write)(void *, int, int), const void *data, int len)
+{
+    struct write_ctx *write_ctx;
+
+    write_ctx = malloc(sizeof(*write_ctx));
+    if (!write_ctx)
+        return NULL;
+
+    write_ctx->tcp_client = tcp_client;
+    write_ctx->on_write = on_write;
+    write_ctx->data = data;
+    write_ctx->len = len;
+    write_ctx->written = 0;
+
+    if (!new_wrapper_ctx(&tcp_client->wrapper_ctx, write_ctx, write_ctx_on_destroy)) {
+        free_write_ctx(write_ctx);
+        return NULL;
+    }
+
+    return write_ctx;
+}
+
 static void do_write(struct write_ctx *wctx)
 {
-
+    
 }
 
 static void async_write_impl(void *ctx)
 {
-    struct write_ctx *wctx = ctx;
-    struct tcp_client_ctx *tctx = wctx->tcp_client;
+    struct write_ctx *write_ctx = ctx;
+    struct tcp_client_ctx *tcp_client_ctx = write_ctx->tcp_client;
 
-    switch (tctx->cstate) {
+    switch (tcp_client_ctx->cstate) {
     case CIO_CS_CONNECTED:
         break;
     case CIO_CS_CONNECTING:
     case CIO_CS_INITIAL:
     case CIO_CS_ERROR:
-        free(wctx);
+        free_write_ctx(write_ctx);
         fprintf(stdout, "async_write_impl: wrong state\n");
         return;
     default:
         assert(0);
     }
 
-    do_write(wctx);
+    do_write(write_ctx);
 }
 
 void cio_tcp_client_async_write(void *tcp_client, const void *data, int len,
     void (*on_write)(void *ctx, int ecode, int written_len))
 {
-    struct write_ctx *wctx;
-    struct tcp_client_ctx *tctx = tcp_client;
+    struct write_ctx *write_ctx;
+    struct tcp_client_ctx *tcp_client_ctx = tcp_client;
     int ecode = 0;
 
-    wctx = malloc(sizeof(*wctx));
-    if (!wctx) {
+    write_ctx = malloc(sizeof(*write_ctx));
+    if (!write_ctx) {
         ecode = CIO_ALLOC_ERROR;
         goto fail;
     }
 
-    wctx->tcp_client = tcp_client;
-    wctx->on_write = on_write;
-    wctx->data = data;
-    wctx->len = len;
-    wctx->written = 0;
+    write_ctx->tcp_client = tcp_client;
+    write_ctx->on_write = on_write;
+    write_ctx->data = data;
+    write_ctx->len = len;
+    write_ctx->written = 0;
 
-    cio_event_loop_add_timer(tctx->event_loop, 0, wctx, async_write_impl);
+    cio_event_loop_add_timer(tcp_client_ctx->event_loop, 0, write_ctx, async_write_impl);
 
 fail:
     cio_perror(ecode, "cio_tcp_client_async_connect");
-    on_write(tctx->ctx, ecode, 0);
+    on_write(tcp_client_ctx->user_ctx, ecode, 0);
 }
