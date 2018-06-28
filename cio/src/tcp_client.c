@@ -618,9 +618,9 @@ fail:
     if (cio_ecode)
         cio_perror(cio_ecode, "do_read");
     if (system_ecode)
-        perror("do_write");
+        perror("do_read");
 
-    read_ctx_cleanup(read_ctx, 1, CIO_WRITE_ERROR);
+    read_ctx_cleanup(read_ctx, 1, CIO_READ_ERROR);
 }
 
 static void async_read_impl(void *ctx)

@@ -11,6 +11,7 @@
 struct test_ctx {
     void **clients;
     int client_count;
+    int send_max;
     int send_count;
     void *clients_event_loop;
     void *server_event_loop;
@@ -19,13 +20,10 @@ struct test_ctx {
 
 static const char *const HOST = "ya.ru";
 static const int PORT = 80;
-static const char *send_buf = " \
-    GET /index.html HTTP/1.1 \
-    User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT) \
+static const char *send_buf =
+    "GET /index.html HTTP/1.1 \
     Host: www.ya.ru \
-    Accept-Language: en-us \
-    Accept-Encoding: gzip, deflate \
-    Connection: Keep-Alive";
+    Connection: Keep-Alive\r\n";
 
 static char recv_buf[1024];
 
@@ -41,7 +39,8 @@ int setup_tcp_server_client_tests(void **ctx)
     int i;
 
     tctx->client_count = 1;
-    tctx->send_count = 10;
+    tctx->send_count = 0;
+    tctx->send_max = 10000;
     tctx->clients_event_loop = cio_new_event_loop(tctx->client_count);
     ASSERT_NE_PTR(NULL, tctx->clients_event_loop);
     pthread_create(&tctx->clients_event_loop_thread, NULL, clients_event_loop_thread_func, tctx);
@@ -74,13 +73,18 @@ int teardown_tcp_server_client_tests(void **ctx)
     return 0;
 }
 
+static void on_client_write(void *ctx, int ecode);
 static void on_client_read(void *ctx, int ecode, int bytes_read)
 {
-    //struct test_ctx *test_ctx = ctx;
+    struct test_ctx *test_ctx = ctx;
     switch (ecode) {
     case CIO_NO_ERROR:
-        fprintf(stdout, "Read successfully\n");
+        fprintf(stdout, "Read successfully: %d\n", test_ctx->send_count++);
+        if (test_ctx->send_count == test_ctx->send_max)
+            return;
         write(fileno(stdout), recv_buf, bytes_read);
+        cio_tcp_client_async_write(test_ctx->clients[0], send_buf, strlen(send_buf),
+            on_client_write);
         break;
     default:
         fprintf(stdout, "Read error: %d\n", ecode);
