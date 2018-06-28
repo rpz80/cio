@@ -5,6 +5,7 @@
 #include <ct.h>
 #include <event_loop.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <pthread.h>
 
 struct test_ctx {
@@ -25,6 +26,8 @@ static const char *send_buf = " \
     Accept-Language: en-us \
     Accept-Encoding: gzip, deflate \
     Connection: Keep-Alive";
+
+static char recv_buf[1024];
 
 static void *clients_event_loop_thread_func(void *ctx)
 {
@@ -71,12 +74,27 @@ int teardown_tcp_server_client_tests(void **ctx)
     return 0;
 }
 
+static void on_client_read(void *ctx, int ecode, int bytes_read)
+{
+    //struct test_ctx *test_ctx = ctx;
+    switch (ecode) {
+    case CIO_NO_ERROR:
+        fprintf(stdout, "Read successfully\n");
+        write(fileno(stdout), recv_buf, bytes_read);
+        break;
+    default:
+        fprintf(stdout, "Read error: %d\n", ecode);
+        break;
+    }
+}
+
 static void on_client_write(void *ctx, int ecode)
 {
-//    struct test_ctx *test_ctx = ctx;
+    struct test_ctx *test_ctx = ctx;
     switch (ecode) {
     case CIO_NO_ERROR:
         fprintf(stdout, "Written successfully\n");
+        cio_tcp_client_async_read(test_ctx->clients[0], recv_buf, sizeof(recv_buf), on_client_read);
         break;
     default:
         fprintf(stdout, "Write error: %d\n", ecode);

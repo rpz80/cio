@@ -127,13 +127,12 @@ static void tcp_client_remove_wrapper_by_posted_ctx(struct tcp_client_ctx *tcp_c
 
     while (wrapper_ctx) {
         if (wrapper_ctx->posted_ctx == posted_ctx) {
-            if (tmp_wrapper_ctx) {
+            if (tmp_wrapper_ctx)
                 tmp_wrapper_ctx->next = wrapper_ctx->next;
-                free(wrapper_ctx);
-                break;
-            } else {
+            else
                 tcp_client_ctx->wrapper_ctx = wrapper_ctx->next;
-            }
+            free(wrapper_ctx);
+            break;
         } else {
             tmp_wrapper_ctx = wrapper_ctx;
             wrapper_ctx = wrapper_ctx->next;
@@ -177,7 +176,7 @@ static void connect_ctx_event_loop_cb(void *ctx, int fd, int flags)
 
     assert(fd == tcp_client_ctx->fd);
     if (flags & CIO_FLAG_OUT)
-        return connect_ctx_cleanup(connect_ctx, 0, CIO_NO_ERROR);;
+        return connect_ctx_cleanup(connect_ctx, 0, CIO_NO_ERROR);
 
     fprintf(stdout, "on_connect_cb, error flags: %d\n", flags);
     connect_ctx_try_next(connect_ctx);
@@ -458,6 +457,11 @@ static void async_write_impl(void *ctx)
     struct write_ctx *write_ctx = ctx;
     struct tcp_client_ctx *tcp_client_ctx = write_ctx->tcp_client;
 
+    if (!tcp_client_ctx) {
+        free_write_ctx(write_ctx);
+        return;
+    }
+
     switch (tcp_client_ctx->cstate) {
     case CIO_CS_CONNECTED:
         tcp_client_ctx->cstate = CIO_CS_IN_PROGRESS;
@@ -466,9 +470,8 @@ static void async_write_impl(void *ctx)
     case CIO_CS_INITIAL:
     case CIO_CS_ERROR:
     case CIO_CS_IN_PROGRESS:
-        /* TODO: report error, change free_write_ctx -> write_ctx_cleanup() */
+        write_ctx->on_write(tcp_client_ctx->user_ctx, CIO_WRONG_STATE_ERROR);
         free_write_ctx(write_ctx);
-        fprintf(stdout, "async_write_impl: wrong state\n");
         return;
     default:
         assert(0);
@@ -494,16 +497,141 @@ void cio_tcp_client_async_write(void *tcp_client, const void *data, int len,
 
 struct read_ctx {
     struct tcp_client_ctx *tcp_client;
-    void (*on_read)(void *ctx, int ecode);
+    void (*on_read)(void *ctx, int ecode, int read_bytes);
     void *data;
     int len;
     int read;
 };
 
+static void read_ctx_on_destroy(void *ctx)
+{
+    struct read_ctx *read_ctx = ctx;
+    read_ctx->tcp_client = NULL;
+}
+
+static void free_read_ctx(struct read_ctx *read_ctx)
+{
+    tcp_client_remove_wrapper_by_posted_ctx(read_ctx->tcp_client, read_ctx);
+    free(read_ctx);
+}
+
+struct read_ctx *new_read_ctx(struct tcp_client_ctx *tcp_client, void (*on_read)(void *, int, int),
+    void *data, int len)
+{
+    struct read_ctx *read_ctx;
+
+    read_ctx = malloc(sizeof(*read_ctx));
+    if (!read_ctx)
+        return NULL;
+
+    read_ctx->tcp_client = tcp_client;
+    read_ctx->on_read = on_read;
+    read_ctx->data = data;
+    read_ctx->len = len;
+    read_ctx->read = 0;
+
+    if (!new_wrapper_ctx(&tcp_client->wrapper_ctx, read_ctx, read_ctx_on_destroy)) {
+        free_read_ctx(read_ctx);
+        return NULL;
+    }
+
+    return read_ctx;
+}
+
+static void do_read(struct read_ctx *read_ctx, int do_remove_add);
+
+static void read_ctx_cleanup(struct read_ctx *read_ctx, int failed, int cio_error)
+{
+    struct tcp_client_ctx *tcp_client_ctx = read_ctx->tcp_client;
+
+    cio_event_loop_remove_fd(tcp_client_ctx->event_loop, tcp_client_ctx->fd);
+    if (failed) {
+        close(tcp_client_ctx->fd);
+        tcp_client_ctx->cstate = CIO_CS_ERROR;
+    } else {
+        tcp_client_ctx->cstate = CIO_CS_CONNECTED;
+    }
+    read_ctx->on_read(tcp_client_ctx->user_ctx, cio_error, read_ctx->read);
+    free_read_ctx(read_ctx);
+}
+
+static void read_ctx_event_loop_cb(void *ctx, int fd, int flags)
+{
+    struct read_ctx *read_ctx = ctx;
+    struct tcp_client_ctx *tcp_client_ctx = read_ctx->tcp_client;
+
+    if (!tcp_client_ctx) {
+        free_read_ctx(read_ctx);
+        return;
+    }
+
+    assert(fd == tcp_client_ctx->fd);
+    if (flags & CIO_FLAG_IN)
+        return do_read(read_ctx, 0);
+
+    fprintf(stdout, "on_read_cb, error flags: %d\n", flags);
+    read_ctx_cleanup(read_ctx, 1, CIO_POLL_ERROR);
+}
+
+static void do_read(struct read_ctx *read_ctx, int do_remove_add)
+{
+    int cio_ecode = CIO_NO_ERROR;
+    int system_ecode = 0;
+    int read_result = 0;
+    struct tcp_client_ctx *tcp_client_ctx = read_ctx->tcp_client;
+
+    while (read_ctx->read != read_ctx->len) {
+        read_result = read(tcp_client_ctx->fd, read_ctx->data, read_ctx->len - read_ctx->read);
+        if (read_result > 0) {
+            read_ctx->read += read_result;
+            if (read_ctx->read == read_ctx->len) {
+                read_ctx_cleanup(read_ctx, 0, CIO_NO_ERROR);
+                return;
+            } else {
+                continue;
+            }
+        } else if (read_result == 0) {
+            read_ctx_cleanup(read_ctx, 0, CIO_NO_ERROR);
+            return;
+        } else {
+            system_ecode = errno;
+            switch (system_ecode) {
+            case EWOULDBLOCK:
+                if (do_remove_add) {
+                    cio_event_loop_remove_fd(tcp_client_ctx->event_loop, tcp_client_ctx->fd);
+                    cio_ecode = cio_event_loop_add_fd(tcp_client_ctx->event_loop, tcp_client_ctx->fd,
+                        CIO_FLAG_IN, read_ctx, read_ctx_event_loop_cb);
+                    if (cio_ecode)
+                        goto fail;
+                }
+                return;
+            case 0:
+                assert(0);
+                break;
+            default:
+                goto fail;
+            }
+        }
+    }
+
+fail:
+    if (cio_ecode)
+        cio_perror(cio_ecode, "do_read");
+    if (system_ecode)
+        perror("do_write");
+
+    read_ctx_cleanup(read_ctx, 1, CIO_WRITE_ERROR);
+}
+
 static void async_read_impl(void *ctx)
 {
     struct read_ctx *read_ctx = ctx;
     struct tcp_client_ctx *tcp_client_ctx = read_ctx->tcp_client;
+
+    if (!tcp_client_ctx) {
+        free_read_ctx(read_ctx);
+        return;
+    }
 
     switch (tcp_client_ctx->cstate) {
     case CIO_CS_CONNECTED:
@@ -513,8 +641,8 @@ static void async_read_impl(void *ctx)
     case CIO_CS_INITIAL:
     case CIO_CS_ERROR:
     case CIO_CS_IN_PROGRESS:
+        read_ctx->on_read(tcp_client_ctx, CIO_WRONG_STATE_ERROR, 0);
         free_read_ctx(read_ctx);
-        fprintf(stdout, "async_read_impl: wrong state\n");
         return;
     default:
         assert(0);
@@ -524,28 +652,16 @@ static void async_read_impl(void *ctx)
 }
 
 void cio_tcp_client_async_read(void *tcp_client, void *data, int len,
-    void (*on_read)(void *ctx, int ecode))
+    void (*on_read)(void *ctx, int ecode, int read_bytes))
 {
-    struct read_ctx *read_ctx;
+    struct read_ctx *read_ctx = new_read_ctx(tcp_client, on_read, data, len);
     struct tcp_client_ctx *tcp_client_ctx = tcp_client;
-    int ecode = 0;
 
-    read_ctx = malloc(sizeof(*read_ctx));
     if (!read_ctx) {
-        ecode = CIO_ALLOC_ERROR;
-        goto fail;
+        cio_perror(CIO_ALLOC_ERROR, "cio_tcp_client_async_read");
+        on_read(tcp_client_ctx->user_ctx, CIO_ALLOC_ERROR, 0);
+        return;
     }
 
-    read_ctx->tcp_client = tcp_client;
-    read_ctx->on_read = on_read;
-    read_ctx->data = data;
-    read_ctx->len = len;
-    read_ctx->read = 0;
-
     cio_event_loop_add_timer(tcp_client_ctx->event_loop, 0, read_ctx, async_read_impl);
-    return;
-
-fail:
-    cio_perror(ecode, "cio_tcp_client_async_read");
-    on_read(tcp_client_ctx->user_ctx, ecode);
 }
