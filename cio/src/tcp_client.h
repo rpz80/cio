@@ -1,6 +1,7 @@
 #if !defined(CIO_TCP_CLIENT_H)
 #define CIO_TCP_CLIENT_H
 
+/* TODO: refactor this to tcp_conection */
 /**
  * ctx - user-provided context. It will be passed to the async functions callbacks.
  */
