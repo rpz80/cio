@@ -1,6 +1,6 @@
 #include "tcp_server_client_ut.h"
 #include "aux/echo_client.h"
-#include <tcp_client.h>
+#include <tcp_connection.h>
 #include <tcp_server.h>
 #include <ct.h>
 #include <event_loop.h>
@@ -23,7 +23,7 @@ static const int PORT = 80;
 static const char *send_buf =
     "GET /index.html HTTP/1.1 \
     Host: www.ya.ru \
-    Connection: Keep-Alive\r\n";
+    Connection: Keep-Alive\r\n\r\n";
 
 static char recv_buf[1024];
 
@@ -52,7 +52,7 @@ int setup_tcp_server_client_tests(void **ctx)
     ASSERT_NE_PTR(NULL, tctx->clients);
 
     for (i = 0; i < tctx->client_count; ++i) {
-        tctx->clients[i] = cio_new_tcp_client(tctx->clients_event_loop, tctx);
+        tctx->clients[i] = cio_new_tcp_connection(tctx->clients_event_loop, tctx);
         ASSERT_NE_PTR(NULL, tctx->clients[i]);
     }
 
@@ -68,7 +68,7 @@ int teardown_tcp_server_client_tests(void **ctx)
 
     pthread_join(tctx->clients_event_loop_thread, &celt_result);
     for (i = 0; i < tctx->client_count; ++i)
-        cio_free_tcp_client(tctx->clients[i]);
+        cio_free_tcp_connection(tctx->clients[i]);
 
     return 0;
 }
@@ -83,7 +83,7 @@ static void on_client_read(void *ctx, int ecode, int bytes_read)
         if (test_ctx->send_count == test_ctx->send_max)
             return;
         write(fileno(stdout), recv_buf, bytes_read);
-        cio_tcp_client_async_write(test_ctx->clients[0], send_buf, strlen(send_buf),
+        cio_tcp_connection_async_write(test_ctx->clients[0], send_buf, strlen(send_buf),
             on_client_write);
         break;
     default:
@@ -98,7 +98,7 @@ static void on_client_write(void *ctx, int ecode)
     switch (ecode) {
     case CIO_NO_ERROR:
         fprintf(stdout, "Written successfully\n");
-        cio_tcp_client_async_read(test_ctx->clients[0], recv_buf, sizeof(recv_buf), on_client_read);
+        cio_tcp_connection_async_read(test_ctx->clients[0], recv_buf, sizeof(recv_buf), on_client_read);
         break;
     default:
         fprintf(stdout, "Write error: %d\n", ecode);
@@ -113,7 +113,7 @@ static void on_client_connect(void *ctx, int ecode)
     switch (ecode) {
     case CIO_NO_ERROR:
         fprintf(stdout, "Connected\n");
-        cio_tcp_client_async_write(test_ctx->clients[0], send_buf, strlen(send_buf),
+        cio_tcp_connection_async_write(test_ctx->clients[0], send_buf, strlen(send_buf),
             on_client_write);
         break;
     default:
@@ -125,5 +125,5 @@ static void on_client_connect(void *ctx, int ecode)
 void test_tcp_server_client(void **ctx)
 {
     struct test_ctx *tctx = *ctx;
-    cio_tcp_client_async_connect(tctx->clients[0], HOST, PORT, on_client_connect);
+    cio_tcp_connection_async_connect(tctx->clients[0], HOST, PORT, on_client_connect);
 }
