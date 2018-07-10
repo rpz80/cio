@@ -355,17 +355,24 @@ int cio_event_loop_remove_fd(void *loop, int fd)
     return cio_event_loop_add_timer(loop, 0, actx, remove_fd_impl);
 }
 
-int cio_event_loop_add_timer(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *))
+int cio_event_loop_dispatch(void *loop, void *cb_ctx, void (*cb)(void *))
 {
-    struct event_loop *el = (struct event_loop *) loop;
-    struct timer_cb_ctx *ta, *prev_ta;
-    struct timer_cb_ctx *timer_ctx;
-    int ecode = 0;
+    struct event_loop *el = loop;
 
-    if (timeout_ms == 0 && pthread_self() == el->self_id) {
+    if (pthread_self() == el->self_id) {
         cb(cb_ctx);
         return 0;
     }
+
+    return cio_event_loop_post(loop, 0, cb_ctx, cb);
+}
+
+int cio_event_loop_post(void *loop, int timeout_ms, void *cb_ctx, void (*cb)(void *))
+{
+    struct event_loop *el = loop;
+    struct timer_cb_ctx *ta, *prev_ta;
+    struct timer_cb_ctx *timer_ctx;
+    int ecode = 0;
 
     if (!(timer_ctx = malloc(sizeof(*timer_ctx))))
         goto fail;
