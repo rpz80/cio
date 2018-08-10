@@ -312,7 +312,7 @@ int cio_event_loop_add_fd(void *loop, int fd, int flags, void *cb_ctx, pollset_c
     actx->flags = flags;
     actx->loop = loop;
 
-    return cio_event_loop_add_timer(loop, 0, actx, add_fd_impl);
+    return cio_event_loop_dispatch(loop, actx, add_fd_impl);
 }
 
 static void remove_fd_impl(void *ctx)
@@ -352,7 +352,7 @@ int cio_event_loop_remove_fd(void *loop, int fd)
     actx->loop = loop;
     actx->fd = fd;
 
-    return cio_event_loop_add_timer(loop, 0, actx, remove_fd_impl);
+    return cio_event_loop_dispatch(loop, actx, remove_fd_impl);
 }
 
 int cio_event_loop_dispatch(void *loop, void *cb_ctx, void (*cb)(void *))

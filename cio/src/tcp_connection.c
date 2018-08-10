@@ -127,7 +127,7 @@ static void free_tcp_connection_impl(void *ctx)
 void cio_free_tcp_connection(void *tcp_connection)
 {
     struct tcp_connection_ctx *tctx = tcp_connection;
-    cio_event_loop_add_timer(tctx->event_loop, 0, tctx, free_tcp_connection_impl);
+    cio_event_loop_post(tctx->event_loop, 0, tctx, free_tcp_connection_impl);
 }
 
 static void tcp_connection_remove_wrapper_by_posted_ctx(struct tcp_connection_ctx *tcp_connection_ctx,
@@ -334,7 +334,7 @@ void cio_tcp_connection_async_connect(void *tcp_connection, const char *addr, in
         on_connect(tcp_connection_ctx->user_ctx, CIO_ALLOC_ERROR);
     }
 
-    cio_event_loop_add_timer(tcp_connection_ctx->event_loop, 0, connect_ctx, async_connect_impl);
+    cio_event_loop_post(tcp_connection_ctx->event_loop, 0, connect_ctx, async_connect_impl);
 }
 
 struct write_ctx {
@@ -509,7 +509,7 @@ void cio_tcp_connection_async_write(void *tcp_connection, const void *data, int 
         return;
     }
 
-    cio_event_loop_add_timer(tcp_connection_ctx->event_loop, 0, write_ctx, async_write_impl);
+    cio_event_loop_post(tcp_connection_ctx->event_loop, 0, write_ctx, async_write_impl);
 }
 
 struct read_ctx {
@@ -681,5 +681,5 @@ void cio_tcp_connection_async_read(void *tcp_connection, void *data, int len,
         return;
     }
 
-    cio_event_loop_add_timer(tcp_connection_ctx->event_loop, 0, read_ctx, async_read_impl);
+    cio_event_loop_post(tcp_connection_ctx->event_loop, 0, read_ctx, async_read_impl);
 }
