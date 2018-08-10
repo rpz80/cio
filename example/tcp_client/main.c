@@ -91,8 +91,10 @@ int main(int argc, char *const argv[])
     }
 
     event_loop = start_event_loop();
-    if (!event_loop)
+    if (!event_loop) {
+        printf("Failed to create and start event loop. Bailing out.\n");
         return EXIT_FAILURE;
+    }
 
     do_work(event_loop, addr_buf, path_buf);
     stop_event_loop(event_loop);
