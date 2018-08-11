@@ -6,12 +6,30 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define BUF_SIZE 1024
 
 static int do_work(void *event_loop, const char *addr, const char *path)
 {
+    DIR *dir;
+    struct dirent *entry;
+    void **connections;
+    const char **files;
+    struct stat stat_buf;
+
+    if (stat(path, &stat_buf)) {
+        perror("stat");
+        return -1;
+    }
+
+    if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
+
+    }
+
     void *connection = cio_new_tcp_connection(event_loop, NULL);
+
 }
 
 static pthread_t event_loop_thread;
