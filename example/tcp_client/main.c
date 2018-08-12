@@ -17,16 +17,56 @@
 struct connection_ctx
 {
     void *connection;
+    int size;
     int fd;
+    char buf[4096];
+    int len;
+    int done;
 };
 
-static void on_connect(void *ctx, int ecode)
+static void free_connection_ctx(struct connection_ctx *ctx)
+{
+    cio_free_tcp_connection(ctx->connection);
+    close(ctx->fd);
+    free(ctx);
+}
+
+static void on_write(void *ctx, int ecode)
 {
     struct connection_ctx *connection_ctx = ctx;
 
 }
 
-static void do_send(void *event_loop, const char *addr, const char *path)
+static void on_connect(void *ctx, int ecode)
+{
+    struct connection_ctx *connection_ctx = ctx;
+    int bytes_read;
+
+    if (ecode != CIO_NO_ERROR) {
+        cio_perror(ecode, "Connection failed");
+        goto fail;
+    }
+
+    int size = htonl(connection_ctx->size);
+    memcpy(connection_ctx->buf, &size, sizeof(size));
+    bytes_read = read(connection_ctx->fd, connection_ctx->buf + sizeof(size),
+        sizeof(connection_ctx->buf) - sizeof(size));
+
+    if (bytes_read == -1) {
+        perror("read file");
+        goto fail;
+    }
+
+    cio_tcp_connection_async_write(connection_ctx->connection, connection_ctx->buf,
+        bytes_read + sizeof(size), on_write);
+
+    return;
+
+fail:
+    free_connection_ctx(connection_ctx);
+}
+
+static void do_send(void *event_loop, const char *addr, const char *path, size_t size)
 {
     struct connection_ctx *ctx;
     char buf[BUF_SIZE];
@@ -40,6 +80,7 @@ static void do_send(void *event_loop, const char *addr, const char *path)
         return;
     }
 
+    ctx->size = size;
     ctx->fd = open(path, O_RDONLY, S_IRUSR);
     if (ctx->fd == -1) {
         printf("Failed to open file %s\n", path);
@@ -47,7 +88,7 @@ static void do_send(void *event_loop, const char *addr, const char *path)
         return;
     }
 
-    ctx->connection = cio_new_tcp_connection(event_loop, (void *) ctx->fd);
+    ctx->connection = cio_new_tcp_connection(event_loop, ctx);
     if (!ctx->connection) {
         printf("Failed to create connection for file %s\n", path);
         close(ctx->fd);
@@ -58,9 +99,7 @@ static void do_send(void *event_loop, const char *addr, const char *path)
     ptr = strstr(addr, ":");
     if (!ptr || ptr == addr || *(ptr + 1) == '\0' || ((port = (int) strtol(ptr + 1, NULL, 10)) == 0 && errno != 0)) {
         printf("Invalid address string %s for file %s\n", addr, path);
-        close(ctx->fd);
-        cio_free_tcp_connection(ctx->connection);
-        free(ctx);
+        free_connection_ctx(ctx);
         return;
     }
 
@@ -68,7 +107,7 @@ static void do_send(void *event_loop, const char *addr, const char *path)
     strncpy(buf, addr, addrlen);
     buf[addrlen] = '\0';
 
-    cio_tcp_connection_async_connect(ctx, buf, port, on_connect);
+    cio_tcp_connection_async_connect(ctx->connection, buf, port, on_connect);
 }
 
 static int do_work(void *event_loop, const char *addr, const char *path)
@@ -84,7 +123,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
     }
 
     if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
-        do_send(event_loop, addr, path);
+        do_send(event_loop, addr, path, stat_buf.st_size);
     } else if ((stat_buf.st_mode & S_IFMT) == S_IFDIR) {
         if (!(dir = opendir(path))) {
             printf("Failed to open dir %s\n", path);
@@ -98,7 +137,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
                 printf("Invalid file %s\n", path_buf);
                 continue;
             }
-            do_send(event_loop, addr, path_buf);
+            do_send(event_loop, addr, path_buf, stat_buf.st_size);
         }
     } else {
         printf("Invalid path %s\n", path);
@@ -141,7 +180,7 @@ static void stop_event_loop(void *event_loop)
     int ecode;
     void *thread_result;
 
-    cio_event_loop_stop(event_loop);
+//    cio_event_loop_stop(event_loop);
     if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
         errno = ecode;
         perror("pthread_join");
