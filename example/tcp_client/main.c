@@ -13,10 +13,10 @@
 
 static int do_work(void *event_loop, const char *addr, const char *path)
 {
-    DIR *dir;
+    struct DIR *dir;
     struct dirent *entry;
     void **connections;
-    const char **files;
+    char **files;
     struct stat stat_buf;
 
     if (stat(path, &stat_buf)) {
@@ -25,11 +25,21 @@ static int do_work(void *event_loop, const char *addr, const char *path)
     }
 
     if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
+        do_send(path);
+    } else if ((stat_buf.st_mode & S_IFMT) == S_IFDIR) {
+        if (!(dir = opendir(path))) {
+            printf("Failed to open dir %s\n", path);
+            return -1;
+        }
 
+    } else {
+        printf("Invalid path %s\n", path);
+        return -1;
     }
 
     void *connection = cio_new_tcp_connection(event_loop, NULL);
 
+    return 0;
 }
 
 static pthread_t event_loop_thread;
@@ -53,6 +63,7 @@ static void *start_event_loop()
     if ((ecode = pthread_create(&event_loop_thread, NULL, event_loop_run_func, event_loop))) {
         errno = ecode;
         perror("pthread_create");
+        cio_free_event_loop(event_loop);
         return NULL;
     }
 
