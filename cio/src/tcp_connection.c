@@ -316,8 +316,6 @@ static void async_connect_impl(void *ctx)
     case CIO_CS_ERROR:
         tcp_connection_ctx->cstate = CIO_CS_CONNECTING;
         break;
-    default:
-        assert(0);
     }
 
     connect_ctx_try_next(connect_ctx);
@@ -662,8 +660,6 @@ static void async_read_impl(void *ctx)
         read_ctx->on_read(tcp_connection_ctx, CIO_WRONG_STATE_ERROR, 0);
         free_read_ctx(read_ctx);
         return;
-    default:
-        assert(0);
     }
 
     do_read(read_ctx, 1);

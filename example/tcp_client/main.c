@@ -6,38 +6,104 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #define BUF_SIZE 1024
+#define MIN(a, b) (a) < (b) ? (a) : (b)
+
+struct connection_ctx
+{
+    void *connection;
+    int fd;
+};
+
+static void on_connect(void *ctx, int ecode)
+{
+    struct connection_ctx *connection_ctx = ctx;
+
+}
+
+static void do_send(void *event_loop, const char *addr, const char *path)
+{
+    struct connection_ctx *ctx;
+    char buf[BUF_SIZE];
+    char *ptr;
+    int port;
+    size_t addrlen;
+
+    ctx = malloc(sizeof(*ctx));
+    if (!ctx) {
+        printf("Failed to create connection context for file %s\n", path);
+        return;
+    }
+
+    ctx->fd = open(path, O_RDONLY, S_IRUSR);
+    if (ctx->fd == -1) {
+        printf("Failed to open file %s\n", path);
+        free(ctx);
+        return;
+    }
+
+    ctx->connection = cio_new_tcp_connection(event_loop, (void *) ctx->fd);
+    if (!ctx->connection) {
+        printf("Failed to create connection for file %s\n", path);
+        close(ctx->fd);
+        free(ctx);
+        return;
+    }
+
+    ptr = strstr(addr, ":");
+    if (!ptr || ptr == addr || *(ptr + 1) == '\0' || ((port = (int) strtol(ptr + 1, NULL, 10)) == 0 && errno != 0)) {
+        printf("Invalid address string %s for file %s\n", addr, path);
+        close(ctx->fd);
+        cio_free_tcp_connection(ctx->connection);
+        free(ctx);
+        return;
+    }
+
+    addrlen = MIN((size_t) (ptr - addr), BUF_SIZE - 1);
+    strncpy(buf, addr, addrlen);
+    buf[addrlen] = '\0';
+
+    cio_tcp_connection_async_connect(ctx, buf, port, on_connect);
+}
 
 static int do_work(void *event_loop, const char *addr, const char *path)
 {
-    struct DIR *dir;
+    DIR *dir;
     struct dirent *entry;
-    void **connections;
-    char **files;
     struct stat stat_buf;
+    char path_buf[BUF_SIZE];
 
     if (stat(path, &stat_buf)) {
-        perror("stat");
+        perror("Stat path");
         return -1;
     }
 
     if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
-        do_send(path);
+        do_send(event_loop, addr, path);
     } else if ((stat_buf.st_mode & S_IFMT) == S_IFDIR) {
         if (!(dir = opendir(path))) {
             printf("Failed to open dir %s\n", path);
             return -1;
         }
-
+        while ((entry = readdir(dir)) != NULL) {
+            strncpy(path_buf, path, BUF_SIZE);
+            path_buf[BUF_SIZE - 1] = '\0';
+            strncat(path_buf, entry->d_name, BUF_SIZE - strlen(path_buf) - 1);
+            if (stat(path_buf, &stat_buf) || ((stat_buf.st_mode & S_IFMT) != S_IFREG)) {
+                printf("Invalid file %s\n", path_buf);
+                continue;
+            }
+            do_send(event_loop, addr, path_buf);
+        }
     } else {
         printf("Invalid path %s\n", path);
         return -1;
     }
-
-    void *connection = cio_new_tcp_connection(event_loop, NULL);
 
     return 0;
 }
