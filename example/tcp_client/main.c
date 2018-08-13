@@ -1,24 +1,15 @@
+#include "../common.h"
 #include <tcp_connection.h>
 #include <event_loop.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <pthread.h>
-#include <errno.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <assert.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
-
-#define BUF_SIZE 1024
-#define MIN(a, b) (a) < (b) ? (a) : (b)
-
-static pthread_t event_loop_thread;
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 enum connection_result {
     in_progress,
@@ -238,32 +229,6 @@ static int do_work(void *event_loop, struct connection_ctx **connections, const 
     return 0;
 }
 
-static void *event_loop_run_func(void *ctx)
-{
-    return (void *) cio_event_loop_run(ctx);
-}
-
-static void *start_event_loop()
-{
-    void *event_loop;
-    int ecode;
-
-    event_loop = cio_new_event_loop(1024);
-    if (!event_loop) {
-        printf("Error creating event loop\n");
-        return NULL;
-    }
-
-    if ((ecode = pthread_create(&event_loop_thread, NULL, event_loop_run_func, event_loop))) {
-        errno = ecode;
-        perror("pthread_create");
-        cio_free_event_loop(event_loop);
-        return NULL;
-    }
-
-    return event_loop;
-}
-
 static int has_unfinished_connections(struct connection_ctx *connections)
 {
     for (; connections; connections = connections->next) {
@@ -274,24 +239,12 @@ static int has_unfinished_connections(struct connection_ctx *connections)
     return 0;
 }
 
-static void wait_for_done(void *event_loop, struct connection_ctx *connections)
+static void before_stop_action(void *ctx)
 {
-    int ecode;
-    void *thread_result;
-
     pthread_mutex_lock(&mutex);
-    while (has_unfinished_connections(connections))
+    while (has_unfinished_connections((struct connection_ctx *) ctx))
         pthread_cond_wait(&cond, &mutex);
     pthread_mutex_unlock(&mutex);
-
-    cio_event_loop_stop(event_loop);
-    if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
-        errno = ecode;
-        perror("pthread_join");
-        return;
-    }
-
-    printf("Event loop has finished, result: %d\n", (int) thread_result);
 }
 
 int main(int argc, char *const argv[])
@@ -323,8 +276,7 @@ int main(int argc, char *const argv[])
         }
     }
 
-    if (!path_buf[0] || !addr_buf[0])
-    {
+    if (!path_buf[0] || !addr_buf[0]) {
         printf("Required options are mising. Run with -h to get help.\n");
         return EXIT_FAILURE;
     }
@@ -337,7 +289,7 @@ int main(int argc, char *const argv[])
 
     connections = NULL;
     do_work(event_loop, &connections, addr_buf, path_buf);
-    wait_for_done(event_loop, connections);
+    wait_for_done(event_loop, connections, before_stop_action);
 
     while(connections) {
         tmp = connections;
