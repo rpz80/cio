@@ -8,21 +8,43 @@
 #include <errno.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <assert.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <arpa/inet.h>
 
 #define BUF_SIZE 1024
 #define MIN(a, b) (a) < (b) ? (a) : (b)
 
-struct connection_ctx
-{
+static pthread_t event_loop_thread;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+enum connection_result {
+    in_progress,
+    done,
+    failed
+};
+
+struct connection_ctx {
     void *connection;
+    char file_name[BUF_SIZE];
     int size;
+    int transferred;
     int fd;
     char buf[4096];
     int len;
-    int done;
+    enum connection_result status;
+    struct connection_ctx *next;
 };
+
+static void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
+{
+    pthread_mutex_lock(&mutex);
+    ctx->status = status;
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&mutex);
+}
 
 static void free_connection_ctx(struct connection_ctx *ctx)
 {
@@ -31,10 +53,56 @@ static void free_connection_ctx(struct connection_ctx *ctx)
     free(ctx);
 }
 
+static void on_write(void *ctx, int ecode);
+
+static void on_read(void *ctx, int ecode, int bytes_read)
+{
+    struct connection_ctx *cctx = ctx;
+    int file_bytes_read;
+
+    if (ecode != CIO_NO_ERROR || bytes_read == 0) {
+        cio_perror(ecode, "on_read");
+        goto fail;
+    }
+
+    if (bytes_read != 4) {
+        printf("on_read: received message of unexpected len for file %s, closing", cctx->file_name);
+        goto fail;
+    }
+
+    cctx->transferred += ntohl(*(int*)(cctx->buf));
+    printf("File %s: %d%%\n", cctx->file_name, (int) (((double) cctx->transferred / cctx->size) * 100));
+    file_bytes_read = read(cctx->fd, cctx->buf, sizeof(cctx->buf));
+
+    if (file_bytes_read == -1) {
+        perror("read file");
+        goto fail;
+    }
+
+    if (file_bytes_read == 0) {
+        connection_ctx_set_status(ctx, done);
+        return;
+    }
+
+
+    cio_tcp_connection_async_write(cctx->connection, cctx->buf, file_bytes_read, on_write);
+
+    return;
+
+fail:
+    connection_ctx_set_status(ctx, failed);
+}
+
 static void on_write(void *ctx, int ecode)
 {
-    struct connection_ctx *connection_ctx = ctx;
+    struct connection_ctx *cctx = ctx;
 
+    if (ecode != CIO_NO_ERROR) {
+        connection_ctx_set_status(ctx, failed);
+        return;
+    }
+
+    cio_tcp_connection_async_read(cctx->connection, cctx->buf, sizeof(cctx->buf), on_read);
 }
 
 static void on_connect(void *ctx, int ecode)
@@ -57,18 +125,25 @@ static void on_connect(void *ctx, int ecode)
         goto fail;
     }
 
+    if (bytes_read == 0) {
+        connection_ctx_set_status(ctx, done);
+        return;
+    }
+
     cio_tcp_connection_async_write(connection_ctx->connection, connection_ctx->buf,
         bytes_read + sizeof(size), on_write);
 
     return;
 
 fail:
-    free_connection_ctx(connection_ctx);
+    connection_ctx_set_status(connection_ctx, failed);
 }
 
-static void do_send(void *event_loop, const char *addr, const char *path, size_t size)
+static void do_send(void *event_loop, struct connection_ctx **connections, const char *addr,
+    const char *path, size_t size)
 {
     struct connection_ctx *ctx;
+    struct connection_ctx *root;
     char buf[BUF_SIZE];
     char *ptr;
     int port;
@@ -79,6 +154,7 @@ static void do_send(void *event_loop, const char *addr, const char *path, size_t
         printf("Failed to create connection context for file %s\n", path);
         return;
     }
+    memset(ctx, 0, sizeof(*ctx));
 
     ctx->size = size;
     ctx->fd = open(path, O_RDONLY, S_IRUSR);
@@ -103,14 +179,26 @@ static void do_send(void *event_loop, const char *addr, const char *path, size_t
         return;
     }
 
+    strncpy(ctx->file_name, path, BUF_SIZE - 1);
+    ctx->file_name[BUF_SIZE - 1] = '\0';
+
     addrlen = MIN((size_t) (ptr - addr), BUF_SIZE - 1);
     strncpy(buf, addr, addrlen);
     buf[addrlen] = '\0';
 
+    if (*connections == NULL) {
+        *connections = ctx;
+    } else {
+        root = *connections;
+        while (root->next)
+            root = root->next;
+        root->next = ctx;
+    }
     cio_tcp_connection_async_connect(ctx->connection, buf, port, on_connect);
 }
 
-static int do_work(void *event_loop, const char *addr, const char *path)
+static int do_work(void *event_loop, struct connection_ctx **connections, const char *addr,
+    const char *path)
 {
     DIR *dir;
     struct dirent *entry;
@@ -118,12 +206,12 @@ static int do_work(void *event_loop, const char *addr, const char *path)
     char path_buf[BUF_SIZE];
 
     if (stat(path, &stat_buf)) {
-        perror("Stat path");
+        printf("Stat failed for %s\n", path);
         return -1;
     }
 
     if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
-        do_send(event_loop, addr, path, stat_buf.st_size);
+        do_send(event_loop, connections, addr, path, stat_buf.st_size);
     } else if ((stat_buf.st_mode & S_IFMT) == S_IFDIR) {
         if (!(dir = opendir(path))) {
             printf("Failed to open dir %s\n", path);
@@ -137,7 +225,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
                 printf("Invalid file %s\n", path_buf);
                 continue;
             }
-            do_send(event_loop, addr, path_buf, stat_buf.st_size);
+            do_send(event_loop, connections, addr, path_buf, stat_buf.st_size);
         }
     } else {
         printf("Invalid path %s\n", path);
@@ -146,8 +234,6 @@ static int do_work(void *event_loop, const char *addr, const char *path)
 
     return 0;
 }
-
-static pthread_t event_loop_thread;
 
 static void *event_loop_run_func(void *ctx)
 {
@@ -175,17 +261,32 @@ static void *start_event_loop()
     return event_loop;
 }
 
-static void stop_event_loop(void *event_loop)
+static int has_unfinished_connections(struct connection_ctx *connections)
+{
+    for (; connections; connections = connections->next) {
+        if (connections->status == in_progress)
+            return 1;
+    }
+
+    return 0;
+}
+
+static void wait_for_done(void *event_loop, struct connection_ctx *connections)
 {
     int ecode;
     void *thread_result;
 
-//    cio_event_loop_stop(event_loop);
+    pthread_mutex_lock(&mutex);
+    while (has_unfinished_connections(connections))
+        pthread_cond_wait(&cond, &mutex);
+
+    cio_event_loop_stop(event_loop);
     if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
         errno = ecode;
         perror("pthread_join");
         return;
     }
+    pthread_mutex_unlock(&mutex);
 
     printf("Event loop has finished, result: %d\n", (int) thread_result);
 }
@@ -196,6 +297,7 @@ int main(int argc, char *const argv[])
     char path_buf[BUF_SIZE];
     char addr_buf[BUF_SIZE];
     void *event_loop;
+    struct connection_ctx *connections, *tmp;
 
     setvbuf(stdout, NULL, _IONBF, 0);
     memset(path_buf, 0, BUF_SIZE);
@@ -230,7 +332,14 @@ int main(int argc, char *const argv[])
         return EXIT_FAILURE;
     }
 
-    do_work(event_loop, addr_buf, path_buf);
-    stop_event_loop(event_loop);
+    connections = NULL;
+    do_work(event_loop, &connections, addr_buf, path_buf);
+    wait_for_done(event_loop, connections);
     cio_free_event_loop(event_loop);
+
+    while(connections) {
+        tmp = connections;
+        connections = connections->next;
+        free_connection_ctx(tmp);
+    }
 }

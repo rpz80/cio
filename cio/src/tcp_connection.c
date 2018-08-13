@@ -378,7 +378,7 @@ struct write_ctx *new_write_ctx(struct tcp_connection_ctx *tcp_connection,
     return write_ctx;
 }
 
-static void do_write(struct write_ctx *write_ctx, int do_remove_add);
+static void do_write(struct write_ctx *write_ctx);
 
 static void write_ctx_cleanup(struct write_ctx *write_ctx, int failed, int cio_error)
 {
@@ -407,13 +407,13 @@ static void write_ctx_event_loop_cb(void *ctx, int fd, int flags)
 
     assert(fd == tcp_connection_ctx->fd);
     if (flags & CIO_FLAG_OUT)
-        return do_write(write_ctx, 0);
+        return do_write(write_ctx);
 
     fprintf(stdout, "on_write_cb, error flags: %d\n", flags);
     write_ctx_cleanup(write_ctx, 1, CIO_POLL_ERROR);
 }
 
-static void do_write(struct write_ctx *write_ctx, int do_remove_add)
+static void do_write(struct write_ctx *write_ctx)
 {
     int cio_ecode = CIO_NO_ERROR;
     int system_ecode = 0;
@@ -440,14 +440,14 @@ static void do_write(struct write_ctx *write_ctx, int do_remove_add)
             system_ecode = errno;
             switch (system_ecode) {
             case EWOULDBLOCK:
-                if (do_remove_add) {
-                    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop,
-                        tcp_connection_ctx->fd);
-                    cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
-                        tcp_connection_ctx->fd, CIO_FLAG_OUT, write_ctx, write_ctx_event_loop_cb);
-                    if (cio_ecode)
-                        goto fail;
-                }
+//                if (do_remove_add) {
+//                    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop,
+//                        tcp_connection_ctx->fd);
+//                    cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
+//                        tcp_connection_ctx->fd, CIO_FLAG_OUT, write_ctx, write_ctx_event_loop_cb);
+//                    if (cio_ecode)
+//                        goto fail;
+//                }
                 return;
             case 0:
                 assert(0);
@@ -492,7 +492,7 @@ static void async_write_impl(void *ctx)
         assert(0);
     }
 
-    do_write(write_ctx, 1);
+    do_write(write_ctx);
 }
 
 void cio_tcp_connection_async_write(void *tcp_connection, const void *data, int len,
@@ -553,7 +553,7 @@ struct read_ctx *new_read_ctx(struct tcp_connection_ctx *tcp_connection,
     return read_ctx;
 }
 
-static void do_read(struct read_ctx *read_ctx, int do_remove_add);
+static void do_read(struct read_ctx *read_ctx);
 
 static void read_ctx_cleanup(struct read_ctx *read_ctx, int failed, int cio_error)
 {
@@ -582,51 +582,45 @@ static void read_ctx_event_loop_cb(void *ctx, int fd, int flags)
 
     assert(fd == tcp_connection_ctx->fd);
     if (flags & CIO_FLAG_IN)
-        return do_read(read_ctx, 0);
+        return do_read(read_ctx);
 
     fprintf(stdout, "on_read_cb, error flags: %d\n", flags);
     read_ctx_cleanup(read_ctx, 1, CIO_POLL_ERROR);
 }
 
-static void do_read(struct read_ctx *read_ctx, int do_remove_add)
+static void do_read(struct read_ctx *read_ctx)
 {
     int cio_ecode = CIO_NO_ERROR;
     int system_ecode = 0;
     int read_result = 0;
     struct tcp_connection_ctx *tcp_connection_ctx = read_ctx->tcp_connection;
 
-    while (read_ctx->read != read_ctx->len) {
-        read_result = read(tcp_connection_ctx->fd, read_ctx->data, read_ctx->len - read_ctx->read);
-        if (read_result > 0) {
-            read_ctx->read += read_result;
-            if (read_ctx->read == read_ctx->len) {
-                read_ctx_cleanup(read_ctx, 0, CIO_NO_ERROR);
-                return;
-            } else {
-                continue;
-            }
-        } else if (read_result == 0) {
-            read_ctx_cleanup(read_ctx, 0, CIO_NO_ERROR);
+    read_result = read(tcp_connection_ctx->fd, read_ctx->data, read_ctx->len - read_ctx->read);
+    if (read_result > 0) {
+        read_ctx->read = read_result;
+        read_ctx_cleanup(read_ctx, 0, CIO_NO_ERROR);
+        return;
+    } else if (read_result == 0) {
+        read_ctx_cleanup(read_ctx, 0, CIO_NO_ERROR);
+        return;
+    } else {
+        system_ecode = errno;
+        switch (system_ecode) {
+        case EWOULDBLOCK:
+//            if (do_remove_add) {
+//                cio_event_loop_remove_fd(tcp_connection_ctx->event_loop,
+//                    tcp_connection_ctx->fd);
+//                cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
+//                    tcp_connection_ctx->fd, CIO_FLAG_IN, read_ctx, read_ctx_event_loop_cb);
+//                if (cio_ecode)
+//                    goto fail;
+//            }
             return;
-        } else {
-            system_ecode = errno;
-            switch (system_ecode) {
-            case EWOULDBLOCK:
-                if (do_remove_add) {
-                    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop,
-                        tcp_connection_ctx->fd);
-                    cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
-                        tcp_connection_ctx->fd, CIO_FLAG_IN, read_ctx, read_ctx_event_loop_cb);
-                    if (cio_ecode)
-                        goto fail;
-                }
-                return;
-            case 0:
-                assert(0);
-                break;
-            default:
-                goto fail;
-            }
+        case 0:
+            assert(0);
+            break;
+        default:
+            goto fail;
         }
     }
 
@@ -662,11 +656,11 @@ static void async_read_impl(void *ctx)
         return;
     }
 
-    do_read(read_ctx, 1);
+    do_read(read_ctx);
 }
 
 void cio_tcp_connection_async_read(void *tcp_connection, void *data, int len,
-    void (*on_read)(void *ctx, int ecode, int read_bytes))
+    void (*on_read)(void *ctx, int ecode, int bytes_read))
 {
     struct read_ctx *read_ctx = new_read_ctx(tcp_connection, on_read, data, len);
     struct tcp_connection_ctx *tcp_connection_ctx = tcp_connection;
