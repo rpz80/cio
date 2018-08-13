@@ -60,13 +60,14 @@ static void on_read(void *ctx, int ecode, int bytes_read)
     struct connection_ctx *cctx = ctx;
     int file_bytes_read;
 
+    printf("on_read\n");
     if (ecode != CIO_NO_ERROR || bytes_read == 0) {
         cio_perror(ecode, "on_read");
         goto fail;
     }
 
     if (bytes_read != 4) {
-        printf("on_read: received message of unexpected len for file %s, closing", cctx->file_name);
+        printf("on_read: received message of unexpected len for file %s, closing\n", cctx->file_name);
         goto fail;
     }
 
@@ -97,6 +98,7 @@ static void on_write(void *ctx, int ecode)
 {
     struct connection_ctx *cctx = ctx;
 
+    printf("on_write\n");
     if (ecode != CIO_NO_ERROR) {
         connection_ctx_set_status(ctx, failed);
         return;
@@ -110,6 +112,7 @@ static void on_connect(void *ctx, int ecode)
     struct connection_ctx *connection_ctx = ctx;
     int bytes_read;
 
+    printf("on_connect\n");
     if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "Connection failed");
         goto fail;
@@ -279,6 +282,7 @@ static void wait_for_done(void *event_loop, struct connection_ctx *connections)
     pthread_mutex_lock(&mutex);
     while (has_unfinished_connections(connections))
         pthread_cond_wait(&cond, &mutex);
+    pthread_mutex_unlock(&mutex);
 
     cio_event_loop_stop(event_loop);
     if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
@@ -286,7 +290,6 @@ static void wait_for_done(void *event_loop, struct connection_ctx *connections)
         perror("pthread_join");
         return;
     }
-    pthread_mutex_unlock(&mutex);
 
     printf("Event loop has finished, result: %d\n", (int) thread_result);
 }
@@ -335,11 +338,12 @@ int main(int argc, char *const argv[])
     connections = NULL;
     do_work(event_loop, &connections, addr_buf, path_buf);
     wait_for_done(event_loop, connections);
-    cio_free_event_loop(event_loop);
 
     while(connections) {
         tmp = connections;
         connections = connections->next;
         free_connection_ctx(tmp);
     }
+
+    cio_free_event_loop(event_loop);
 }
