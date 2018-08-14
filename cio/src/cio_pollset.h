@@ -1,7 +1,7 @@
 #if !defined(CIO_POLLSET_H)
 #define CIO_POLLSET_H
 
-#include "common.h"
+#include "cio_common.h"
 
 void *cio_new_pollset();
 void cio_free_pollset(void *pollset);

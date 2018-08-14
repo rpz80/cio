@@ -1,5 +1,5 @@
 #include "event_loop_ut.h"
-#include <event_loop.h>
+#include <cio_event_loop.h>
 #include <ct.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -224,7 +224,7 @@ static void when_timers_added(struct loop_ctx *lctx, int timer_count)
     int ecode = 0, i;
 
     for (i = 0; i < timer_count; ++i) {
-        ecode = cio_event_loop_add_timer(lctx->loop, timer_count*10 - i*10, lctx, on_timer);
+        ecode = cio_event_loop_post(lctx->loop, timer_count*10 - i*10, lctx, on_timer);
 //        usleep(i * 1000);
     }
     ASSERT_EQ_INT(CIO_NO_ERROR, ecode);

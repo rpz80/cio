@@ -1,5 +1,5 @@
-#include "pollset.h"
-#include "common.h"
+#include "cio_pollset.h"
+#include "cio_common.h"
 #include "config.h"
 #include <stdlib.h>
 #include <assert.h>

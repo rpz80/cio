@@ -1,9 +1,9 @@
 #include "tcp_server_client_ut.h"
 #include "aux/echo_client.h"
-#include <tcp_connection.h>
-#include <tcp_server.h>
+#include <cio_tcp_connection.h>
+#include <cio_tcp_server.h>
 #include <ct.h>
-#include <event_loop.h>
+#include <cio_event_loop.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>

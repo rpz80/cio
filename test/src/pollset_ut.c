@@ -1,5 +1,5 @@
 #include "pollset_ut.h"
-#include <pollset.h>
+#include <cio_pollset.h>
 #include <ct.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -81,7 +81,7 @@ void test_pollset_poll(void **ctx)
 
     ASSERT_EQ_INT(0, pipe(test_pipe));
     ASSERT_LT_INT(0, write(test_pipe[1], buf, sizeof(buf)));
-    
+
     result = cio_pollset_add(*ctx, test_pipe[0], CIO_FLAG_IN);
     ASSERT_EQ_INT(CIO_NO_ERROR, result);
 

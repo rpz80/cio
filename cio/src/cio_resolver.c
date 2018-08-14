@@ -1,5 +1,5 @@
-#include "resolv.h"
-#include "common.h"
+#include "cio_resolver.h"
+#include "cio_common.h"
 #include <sys/un.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,7 +102,7 @@ int cio_resolver_next_endpoint(void *resolver, struct addrinfo *addr)
 {
     struct resolver_ctx *rctx = (struct resolver_ctx *) resolver;
 
-     while (rctx->current) {
+    while (rctx->current) {
         if (rctx->current->ai_socktype == rctx->socktype || rctx->socktype == 0) {
             memcpy(addr, rctx->current, sizeof(*addr));
             rctx->current = rctx->current->ai_next;

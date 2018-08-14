@@ -1,13 +1,28 @@
 #include "common.h"
-#include <event_loop.h>
+#include <cio_event_loop.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <errno.h>
 #include <stdio.h>
 
-static pthread_t event_loop_thread;
+pthread_t event_loop_thread;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
+{
+    pthread_mutex_lock(&mutex);
+    ctx->status = status;
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&mutex);
+}
+
+void free_connection_ctx(struct connection_ctx *ctx)
+{
+    cio_free_tcp_connection(ctx->connection);
+    close(ctx->fd);
+    free(ctx);
+}
 
 static void *event_loop_run_func(void *ctx)
 {
@@ -33,20 +48,4 @@ void *start_event_loop()
     }
 
     return event_loop;
-}
-
-void wait_for_done(void *event_loop, void *ctx, void (*before_stop_action)(void *))
-{
-    int ecode;
-    void *thread_result;
-
-    before_stop_action(ctx);
-    cio_event_loop_stop(event_loop);
-    if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
-        errno = ecode;
-        perror("pthread_join");
-        return;
-    }
-
-    printf("Event loop has finished, result: %d\n", (int) thread_result);
 }

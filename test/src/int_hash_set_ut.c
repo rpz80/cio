@@ -1,5 +1,5 @@
 #include "int_hash_set_ut.h"
-#include <hash_set.h>
+#include <cio_hash_set.h>
 #include <stdlib.h>
 #include <ct.h>
 

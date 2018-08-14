@@ -1,7 +1,7 @@
 #if !defined(CIO_EVENT_LOOP_H)
 #define CIO_EVENT_LOOP_H
 
-#include "common.h"
+#include "cio_common.h"
 
 void *cio_new_event_loop(int expected_capacity);
 void cio_free_event_loop(void *loop);

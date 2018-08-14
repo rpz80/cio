@@ -1,5 +1,9 @@
-#include <tcp_connection.h>
+#include "../common.h"
+#include <cio_tcp_connection.h>
+#include <cio_event_loop.h>
 #include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
 int main(int argc, char *const argv[])
 {
@@ -38,16 +42,6 @@ int main(int argc, char *const argv[])
     if (!event_loop) {
         printf("Failed to create and start event loop. Bailing out.\n");
         return EXIT_FAILURE;
-    }
-
-    connections = NULL;
-    do_work(event_loop, &connections, addr_buf, path_buf);
-    wait_for_done(event_loop, connections);
-
-    while(connections) {
-        tmp = connections;
-        connections = connections->next;
-        free_connection_ctx(tmp);
     }
 
     cio_free_event_loop(event_loop);

@@ -1,6 +1,6 @@
 #include "../common.h"
-#include <tcp_connection.h>
-#include <event_loop.h>
+#include <cio_tcp_connection.h>
+#include <cio_event_loop.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,38 +11,7 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 
-enum connection_result {
-    in_progress,
-    done,
-    failed
-};
-
-struct connection_ctx {
-    void *connection;
-    char file_name[BUF_SIZE];
-    int size;
-    int transferred;
-    int fd;
-    char buf[4096];
-    int len;
-    enum connection_result status;
-    struct connection_ctx *next;
-};
-
-static void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
-{
-    pthread_mutex_lock(&mutex);
-    ctx->status = status;
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mutex);
-}
-
-static void free_connection_ctx(struct connection_ctx *ctx)
-{
-    cio_free_tcp_connection(ctx->connection);
-    close(ctx->fd);
-    free(ctx);
-}
+static struct connection_ctx *connections;
 
 static void on_write(void *ctx, int ecode);
 
@@ -133,8 +102,7 @@ fail:
     connection_ctx_set_status(connection_ctx, failed);
 }
 
-static void do_send(void *event_loop, struct connection_ctx **connections, const char *addr,
-    const char *path, size_t size)
+static void do_send(void *event_loop, const char *addr, const char *path, size_t size)
 {
     struct connection_ctx *ctx;
     struct connection_ctx *root;
@@ -180,10 +148,10 @@ static void do_send(void *event_loop, struct connection_ctx **connections, const
     strncpy(buf, addr, addrlen);
     buf[addrlen] = '\0';
 
-    if (*connections == NULL) {
-        *connections = ctx;
+    if (connections == NULL) {
+        connections = ctx;
     } else {
-        root = *connections;
+        root = connections;
         while (root->next)
             root = root->next;
         root->next = ctx;
@@ -191,8 +159,7 @@ static void do_send(void *event_loop, struct connection_ctx **connections, const
     cio_tcp_connection_async_connect(ctx->connection, buf, port, on_connect);
 }
 
-static int do_work(void *event_loop, struct connection_ctx **connections, const char *addr,
-    const char *path)
+static int do_work(void *event_loop, const char *addr, const char *path)
 {
     DIR *dir;
     struct dirent *entry;
@@ -205,7 +172,7 @@ static int do_work(void *event_loop, struct connection_ctx **connections, const 
     }
 
     if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
-        do_send(event_loop, connections, addr, path, stat_buf.st_size);
+        do_send(event_loop, addr, path, stat_buf.st_size);
     } else if ((stat_buf.st_mode & S_IFMT) == S_IFDIR) {
         if (!(dir = opendir(path))) {
             printf("Failed to open dir %s\n", path);
@@ -219,7 +186,7 @@ static int do_work(void *event_loop, struct connection_ctx **connections, const 
                 printf("Invalid file %s\n", path_buf);
                 continue;
             }
-            do_send(event_loop, connections, addr, path_buf, stat_buf.st_size);
+            do_send(event_loop, addr, path_buf, stat_buf.st_size);
         }
     } else {
         printf("Invalid path %s\n", path);
@@ -229,7 +196,7 @@ static int do_work(void *event_loop, struct connection_ctx **connections, const 
     return 0;
 }
 
-static int has_unfinished_connections(struct connection_ctx *connections)
+static int has_unfinished_connections()
 {
     for (; connections; connections = connections->next) {
         if (connections->status == in_progress)
@@ -239,12 +206,24 @@ static int has_unfinished_connections(struct connection_ctx *connections)
     return 0;
 }
 
-static void before_stop_action(void *ctx)
+void wait_for_done(void *event_loop)
 {
+    int ecode;
+    void *thread_result;
+
     pthread_mutex_lock(&mutex);
-    while (has_unfinished_connections((struct connection_ctx *) ctx))
+    while (has_unfinished_connections())
         pthread_cond_wait(&cond, &mutex);
     pthread_mutex_unlock(&mutex);
+
+    cio_event_loop_stop(event_loop);
+    if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
+        errno = ecode;
+        perror("pthread_join");
+        return;
+    }
+
+    printf("Event loop has finished, result: %d\n", (int) thread_result);
 }
 
 int main(int argc, char *const argv[])
@@ -253,7 +232,7 @@ int main(int argc, char *const argv[])
     char path_buf[BUF_SIZE];
     char addr_buf[BUF_SIZE];
     void *event_loop;
-    struct connection_ctx *connections, *tmp;
+    struct connection_ctx *tmp;
 
     setvbuf(stdout, NULL, _IONBF, 0);
     memset(path_buf, 0, BUF_SIZE);
@@ -288,8 +267,8 @@ int main(int argc, char *const argv[])
     }
 
     connections = NULL;
-    do_work(event_loop, &connections, addr_buf, path_buf);
-    wait_for_done(event_loop, connections, before_stop_action);
+    do_work(event_loop,addr_buf, path_buf);
+    wait_for_done(event_loop);
 
     while(connections) {
         tmp = connections;
