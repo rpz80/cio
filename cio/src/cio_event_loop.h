@@ -8,6 +8,10 @@ void cio_free_event_loop(void *loop);
 
 int cio_event_loop_run(void *loop);
 int cio_event_loop_stop(void *loop);
+
+/**
+ * Check CIO_FLAGS for possible flags value.
+ */
 int cio_event_loop_add_fd(void *loop, int fd, int flags, void *cb_ctx, pollset_cb_t cb);
 int cio_event_loop_remove_fd(void *loop, int fd);
 
