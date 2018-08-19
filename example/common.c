@@ -7,41 +7,6 @@
 #include <stdio.h>
 
 pthread_t event_loop_thread;
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-struct connection_ctx *connections;
-
-void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
-{
-    cio_free_tcp_connection(ctx->connection);
-    ctx->connection = NULL;
-
-    pthread_mutex_lock(&mutex);
-    ctx->status = status;
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mutex);
-}
-
-void add_connection(struct connection_ctx *connection)
-{
-    struct connection_ctx *root;
-
-    if (connections == NULL) {
-        connections = connection;
-    } else {
-        root = connections;
-        while (root->next)
-            root = root->next;
-        root->next = connection;
-    }
-}
-
-void free_connection_ctx(struct connection_ctx *ctx)
-{
-    cio_free_tcp_connection(ctx->connection);
-    close(ctx->fd);
-    free(ctx);
-}
 
 static void *event_loop_run_func(void *ctx)
 {

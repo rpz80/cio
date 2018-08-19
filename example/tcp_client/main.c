@@ -11,6 +11,60 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+enum connection_result {
+    in_progress,
+    done,
+    failed
+};
+
+struct connection_ctx {
+    void *connection;
+    char file_name[BUF_SIZE];
+    int size;
+    int transferred;
+    int fd;
+    char buf[4096];
+    int len;
+    enum connection_result status;
+    struct connection_ctx *next;
+};
+
+struct connection_ctx *connections;
+
+void add_connection(struct connection_ctx *connection)
+{
+    struct connection_ctx *root;
+
+    if (connections == NULL) {
+        connections = connection;
+    } else {
+        root = connections;
+        while (root->next)
+            root = root->next;
+        root->next = connection;
+    }
+}
+
+void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
+{
+    cio_free_tcp_connection(ctx->connection);
+    ctx->connection = NULL;
+
+    pthread_mutex_lock(&mutex);
+    ctx->status = status;
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&mutex);
+}
+
+void free_connection_ctx(struct connection_ctx *ctx)
+{
+    cio_free_tcp_connection(ctx->connection);
+    close(ctx->fd);
+    free(ctx);
+}
 
 static void on_write(void *ctx, int ecode);
 static void send_file(struct connection_ctx *ctx, int send_header);
