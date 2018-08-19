@@ -1,5 +1,6 @@
 #include "common.h"
 #include <cio_event_loop.h>
+#include <cio_tcp_connection.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <errno.h>
