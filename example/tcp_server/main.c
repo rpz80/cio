@@ -9,8 +9,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-static struct connection_ctx *connections = NULL;
-
 static int setup_data_dir(const char *path)
 {
     struct stat stat_buf;
@@ -29,6 +27,11 @@ static int setup_data_dir(const char *path)
 
 static void on_accept(void *connection, void *user_ctx, int ecode)
 {
+    if (ecode != CIO_NO_ERROR) {
+        cio_perror(ecode, "on_accept");
+        return;
+    }
+
 
 }
 

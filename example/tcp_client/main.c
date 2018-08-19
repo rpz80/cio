@@ -11,18 +11,22 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 
-static struct connection_ctx *connections;
 
 static void on_write(void *ctx, int ecode);
+static void send_file(struct connection_ctx *ctx, int send_header);
 
 static void on_read(void *ctx, int ecode, int bytes_read)
 {
     struct connection_ctx *cctx = ctx;
-    int file_bytes_read;
 
     printf("on_read\n");
-    if (ecode != CIO_NO_ERROR || bytes_read == 0) {
+    if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_read");
+        goto fail;
+    }
+
+    if (bytes_read == 0) {
+        printf("Connection closed by peer, file: %s\n", cctx->file_name);
         goto fail;
     }
 
@@ -33,21 +37,14 @@ static void on_read(void *ctx, int ecode, int bytes_read)
 
     cctx->transferred += ntohl(*(int*)(cctx->buf));
     printf("File %s: %d%%\n", cctx->file_name, (int) (((double) cctx->transferred / cctx->size) * 100));
-    file_bytes_read = read(cctx->fd, cctx->buf, sizeof(cctx->buf));
 
-    if (file_bytes_read == -1) {
-        perror("read file");
-        goto fail;
-    }
-
-    if (file_bytes_read == 0) {
+    if (cctx->transferred == cctx->size) {
         connection_ctx_set_status(ctx, done);
+        printf("File %s transferred successfully\n", cctx->file_name);
         return;
     }
 
-
-    cio_tcp_connection_async_write(cctx->connection, cctx->buf, file_bytes_read, on_write);
-
+    send_file(ctx, 0);
     return;
 
 fail:
@@ -67,45 +64,53 @@ static void on_write(void *ctx, int ecode)
     cio_tcp_connection_async_read(cctx->connection, cctx->buf, sizeof(cctx->buf), on_read);
 }
 
-static void on_connect(void *ctx, int ecode)
+static void send_file(struct connection_ctx *ctx, int send_header)
 {
-    struct connection_ctx *connection_ctx = ctx;
-    int bytes_read;
+    int offset = 0;
+    int tmp;
+    int file_bytes_read, file_name_len;
 
-    printf("on_connect\n");
-    if (ecode != CIO_NO_ERROR) {
-        cio_perror(ecode, "Connection failed");
-        goto fail;
+    if (send_header) {
+        file_name_len = strlen(ctx->file_name);
+        tmp = htonl(file_name_len);
+        memcpy(ctx->buf, &tmp, sizeof(tmp));
+        offset += sizeof(tmp);
+        tmp = MIN(file_name_len, sizeof(ctx->buf) - offset);
+        memcpy(ctx->buf + offset, ctx->file_name, tmp);
+        offset += tmp;
+        tmp = htonl(ctx->size);
+        memcpy(ctx->buf + offset, &tmp, sizeof(tmp));
+        offset += sizeof(tmp);
     }
 
-    int size = htonl(connection_ctx->size);
-    memcpy(connection_ctx->buf, &size, sizeof(size));
-    bytes_read = read(connection_ctx->fd, connection_ctx->buf + sizeof(size),
-        sizeof(connection_ctx->buf) - sizeof(size));
-
-    if (bytes_read == -1) {
-        perror("read file");
-        goto fail;
-    }
-
-    if (bytes_read == 0) {
-        connection_ctx_set_status(ctx, done);
+    file_bytes_read = read(ctx->fd, ctx->buf + offset, sizeof(ctx->buf) - offset);
+    if (file_bytes_read == -1) {
+        printf("Error reading file %s\n", ctx->file_name);
+        connection_ctx_set_status(ctx, failed);
         return;
     }
 
-    cio_tcp_connection_async_write(connection_ctx->connection, connection_ctx->buf,
-        bytes_read + sizeof(size), on_write);
-
-    return;
-
-fail:
-    connection_ctx_set_status(connection_ctx, failed);
+    offset += file_bytes_read;
+    cio_tcp_connection_async_write(ctx->connection, ctx->buf, offset, on_write);
 }
 
-static void do_send(void *event_loop, const char *addr, const char *path, size_t size)
+static void on_connect(void *ctx, int ecode)
+{
+    struct connection_ctx *connection_ctx = ctx;
+
+    printf("on_connect\n");
+    if (ecode != CIO_NO_ERROR) {
+        cio_perror((enum CIO_ERROR) ecode, "Connection failed");
+        connection_ctx_set_status(connection_ctx, failed);
+        return;
+    }
+
+    send_file(ctx, 1);
+}
+
+static void init_connection(void *event_loop, const char *addr, const char *path, size_t size)
 {
     struct connection_ctx *ctx;
-    struct connection_ctx *root;
     char buf[BUF_SIZE];
     char *ptr;
     int port;
@@ -148,14 +153,7 @@ static void do_send(void *event_loop, const char *addr, const char *path, size_t
     strncpy(buf, addr, addrlen);
     buf[addrlen] = '\0';
 
-    if (connections == NULL) {
-        connections = ctx;
-    } else {
-        root = connections;
-        while (root->next)
-            root = root->next;
-        root->next = ctx;
-    }
+    add_connection(ctx);
     cio_tcp_connection_async_connect(ctx->connection, buf, port, on_connect);
 }
 
@@ -172,7 +170,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
     }
 
     if ((stat_buf.st_mode & S_IFMT) == S_IFREG) {
-        do_send(event_loop, addr, path, stat_buf.st_size);
+        init_connection(event_loop, addr, path, stat_buf.st_size);
     } else if ((stat_buf.st_mode & S_IFMT) == S_IFDIR) {
         if (!(dir = opendir(path))) {
             printf("Failed to open dir %s\n", path);
@@ -186,7 +184,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
                 printf("Invalid file %s\n", path_buf);
                 continue;
             }
-            do_send(event_loop, addr, path_buf, stat_buf.st_size);
+            init_connection(event_loop, addr, path_buf, stat_buf.st_size);
         }
     } else {
         printf("Invalid path %s\n", path);

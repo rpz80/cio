@@ -30,7 +30,10 @@ struct connection_ctx {
     struct connection_ctx *next;
 };
 
+extern struct connection_ctx *connections;
+
 void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status);
 void free_connection_ctx(struct connection_ctx *ctx);
+void add_connection(struct connection_ctx *ctx);
 
 void *start_event_loop();
