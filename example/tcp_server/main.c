@@ -20,6 +20,10 @@ struct connection_ctx {
     void *connection;
     enum connection_state state;
     char buf[4096];
+    int buf_data_size;
+    int buf_data_offset;
+    int file_name_len;
+    int file_size;
     char file_name[BUF_SIZE];
 };
 
@@ -45,20 +49,57 @@ static int setup_data_dir(const char *path)
     return 0;
 }
 
+static void on_read(void *ctx, int ecode, int bytes_read);
+
+static void parse_buf(struct connection_ctx *cctx)
+{
+    switch (cctx->state) {
+    case name_len:
+        if (cctx->buf_data_size < sizeof(cctx->file_name_len)) {
+            cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
+                sizeof(cctx->buf) - cctx->buf_data_size, on_read);
+        } else {
+            cctx->file_name_len = ntohl(*((int*)cctx->buf));
+            cctx->buf_data_offset += sizeof(cctx->file_name_len);
+            cctx->state = name;
+            parse_buf(cctx);
+        }
+        break;
+    case name:
+        if (cctx->buf_data_size - cctx->buf_data_offset < cctx->file_name_len) {
+            cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
+                sizeof(cctx->buf) - cctx->buf_data_size, on_read);
+        } else {
+            memcpy(cctx->file_name, cctx->buf + cctx->buf_data_offset, cctx->file_name_len);
+            cctx->buf_data_offset += cctx->file_name_len;
+            cctx->state = file_len;
+            parse_buf(cctx);
+        }
+        break;
+    case file_len:
+        if (cctx->buf_data_size - cctx->buf_data_offset < sizeof(cctx->file_size)) {
+            cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
+                sizeof(cctx->buf) - cctx->buf_data_size, on_read);
+        } else {
+            cctx->file_size = ntohl(*((int*)(cctx->buf + cctx->buf_data_offset)));
+            cctx->buf_data_offset += sizeof(cctx->file_len);
+            cctx->state = file;
+            parse_buf(cctx);
+        }
+        break;
+    }
+}
+
 static void on_read(void *ctx, int ecode, int bytes_read)
 {
     struct connection_ctx *cctx = ctx;
-    int offset = 0;
-    int nlen;
 
     if (ecode != CIO_NO_ERROR || bytes_read == 0)
         goto fail;
 
-    switch (cctx->state) {
-    case name_len:
-
-        break;
-    }
+    cctx->buf_data_size += bytes_read;
+    parse_buf(cctx);
+    return;
 
 fail:
     if (ecode != CIO_NO_ERROR)
@@ -74,7 +115,7 @@ static void on_accept(void *connection, void *user_ctx, int ecode)
 {
     struct connection_ctx *cctx;
 
-    if (ecode != CIO_NO_ERROR) {struct connection_ctx *cctx;
+    if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_accept");
         return;
     }
