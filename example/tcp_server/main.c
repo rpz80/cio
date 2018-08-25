@@ -24,8 +24,12 @@ struct connection_ctx {
     int buf_data_offset;
     int file_name_len;
     int file_size;
-    char file_name[BUF_SIZE];
+    int transferred;
+    char file_name[BUFSIZ];
+    int fd;
 };
+
+static char path_buf[BUFSIZ];
 
 static void free_connection_ctx(struct connection_ctx *ctx)
 {
@@ -41,6 +45,11 @@ static int setup_data_dir(const char *path)
         return -1;
     }
 
+    if (stat(path, &stat_buf) == -1) {
+        perror("setup_data_dir: stat after mkdir");
+        return -1;
+    }
+
     if ((stat_buf.st_mode & S_IFMT) != S_IFDIR) {
         printf("setup_data_dir: '%s' is not a directory\n", path);
         return -1;
@@ -51,8 +60,38 @@ static int setup_data_dir(const char *path)
 
 static void on_read(void *ctx, int ecode, int bytes_read);
 
+static int prepare_file(struct connection_ctx *cctx)
+{
+    char path[BUFSIZ];
+
+    memset(path, 0, BUFSIZ);
+    strncat(path, path_buf, BUFSIZ - 1);
+    strncat(path, cctx->file_name, BUFSIZ - strlen(path_buf) - 1);
+
+    if ((cctx->fd = open(path, O_WRONLY, S_IRWXU)) == -1) {
+        perror("open");
+        return -1;
+    }
+
+    return 0;
+}
+
+static void on_write(void *ctx, int ecode)
+{
+    struct connection_ctx *cctx = ctx;
+
+    if (ecode != CIO_NO_ERROR) {
+        cio_perror(ecode, "on_write");
+        free_connection_ctx(cctx);
+    }
+
+    cio_tcp_connection_async_read(cctx->connection, cctx->buf, sizeof(cctx->buf), on_read);
+}
+
 static void parse_buf(struct connection_ctx *cctx)
 {
+    int written;
+
     switch (cctx->state) {
     case name_len:
         if (cctx->buf_data_size < sizeof(cctx->file_name_len)) {
@@ -82,12 +121,33 @@ static void parse_buf(struct connection_ctx *cctx)
                 sizeof(cctx->buf) - cctx->buf_data_size, on_read);
         } else {
             cctx->file_size = ntohl(*((int*)(cctx->buf + cctx->buf_data_offset)));
-            cctx->buf_data_offset += sizeof(cctx->file_len);
+            cctx->buf_data_offset += sizeof(cctx->file_size);
             cctx->state = file;
+            if (prepare_file(cctx)) {
+                printf("Failed to prepare file %s\n", cctx->file_name);
+                goto fail;
+            }
             parse_buf(cctx);
         }
         break;
+    case file:
+        written = write(cctx->fd, cctx->buf + cctx->buf_data_offset,
+            cctx->buf_data_size - cctx->buf_data_offset);
+        if (written == -1) {
+            perror("write");
+            goto fail;
+        }
+        cctx->transferred += written;
+        cctx->buf_data_size = 0;
+        cctx->buf_data_offset = 0;
+        cio_tcp_connection_async_write(cctx->connection, &cctx->transferred,
+            sizeof(cctx->transferred), on_write);
+        break;
     }
+    return;
+
+fail:
+    free_connection_ctx(cctx);
 }
 
 static void on_read(void *ctx, int ecode, int bytes_read)
@@ -107,8 +167,7 @@ fail:
     else
         printf("on_read: connection closed, file: %s\n", cctx->file_name);
 
-    cio_free_tcp_connection(cctx->connection);
-    free(cctx);
+    free_connection_ctx(cctx);
 }
 
 static void on_accept(void *connection, void *user_ctx, int ecode)
@@ -133,37 +192,39 @@ static void on_accept(void *connection, void *user_ctx, int ecode)
 
 int main(int argc, char *const argv[])
 {
-    int opt;
-    char path_buf[BUF_SIZE];
-    char addr_buf[BUF_SIZE];
+    int opt, port;
+    char addr_buf_option[BUFSIZ];
+    char host_addr[BUFSIZ];
     void *event_loop = NULL;
     void *tcp_server = NULL;
+    void *thread_result;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    memset(path_buf, 0, BUF_SIZE);
-    memset(addr_buf, 0, BUF_SIZE);
+    memset(path_buf, 0, BUFSIZ);
+    memset(addr_buf_option, 0, BUFSIZ);
     while ((opt = getopt(argc, argv, "a:p:h")) != -1) {
         switch (opt) {
         case 'p':
-            strncpy(path_buf, optarg, BUF_SIZE - 1);
-            path_buf[BUF_SIZE - 1] = '\0';
+            strncat(path_buf, optarg, BUFSIZ - 1);
             break;
         case 'a':
-            strncpy(addr_buf, optarg, BUF_SIZE - 1);
-            addr_buf[BUF_SIZE - 1] = '\0';
+            strncat(addr_buf_option, optarg, BUFSIZ - 1);
             break;
         case 'h':
             printf("Example tcp server. Receives file(s) and writes them to the <path>.\n" \
                    " -a <host:port>  for example: -a 0.0.0.0:27158 \n" \
-                   " -p <path>  absolute path to the files directory (./data by default)\n");
+                   " -p <path>  absolute path to the files directory (/tmp/cio_example_server_data by default)\n");
             return EXIT_SUCCESS;
         }
     }
 
-    if (!addr_buf[0]) {
+    if (!addr_buf_option[0]) {
         printf("Address is required. Run with -h to get help.\n");
         return EXIT_FAILURE;
     }
+
+    if (!path_buf[0])
+        strncat(path_buf, "/tmp/cio_example_server_data", BUFSIZ);
 
     if (setup_data_dir(path_buf))
         return EXIT_FAILURE;
@@ -174,13 +235,23 @@ int main(int argc, char *const argv[])
         return EXIT_FAILURE;
     }
 
-    tcp_server = cio_new_tcp_server(event_loop, NULL, on_accept);
+    tcp_server = cio_new_tcp_server(event_loop, NULL);
     if (!tcp_server) {
         printf("Failed to create tcp_server instance. Bailing out.\n");
         cio_free_event_loop(event_loop);
         return EXIT_FAILURE;
     }
 
+    if (parse_addr_string(addr_buf_option, host_addr, BUFSIZ, &port)) {
+        printf("Invalid address: %s\n", addr_buf_option);
+        cio_free_tcp_server(tcp_server);
+        cio_free_event_loop(event_loop);
+        return EXIT_FAILURE;
+    }
+
+    cio_tcp_server_async_accept(tcp_server, host_addr, port, on_accept);
+    pthread_join(event_loop_thread, &thread_result);
+    cio_free_tcp_server(tcp_server);
     cio_free_event_loop(event_loop);
 
     return EXIT_SUCCESS;

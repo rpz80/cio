@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 pthread_t event_loop_thread;
 
@@ -32,4 +33,23 @@ void *start_event_loop()
     }
 
     return event_loop;
+}
+
+int parse_addr_string(const char *input_string, char *host_addr_buf, int host_addr_buf_len,
+    int *port)
+{
+    const char *ptr;
+    int addrlen;
+
+    memset(host_addr_buf, 0, host_addr_buf_len);
+    ptr = strstr(input_string, ":");
+    if (!ptr || ptr == input_string || *(ptr + 1) == '\0'
+            || ((*port = (int) strtol(ptr + 1, NULL, 10)) == 0 && errno != 0)) {
+        return -1;
+    }
+
+    addrlen = MIN((size_t) (ptr - input_string), host_addr_buf_len - 1);
+    strncat(host_addr_buf, input_string, addrlen);
+
+    return 0;
 }

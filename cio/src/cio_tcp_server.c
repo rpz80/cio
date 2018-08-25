@@ -19,8 +19,7 @@ struct tcp_server_ctx {
     int fd;
 };
 
-void *cio_new_tcp_server(void *event_loop, void *user_ctx,
-    void (*on_accept)(void *connection, void *user_ctx, int ecode))
+void *cio_new_tcp_server(void *event_loop, void *user_ctx)
 {
     struct tcp_server_ctx *sctx;
 
@@ -31,7 +30,6 @@ void *cio_new_tcp_server(void *event_loop, void *user_ctx,
     memset(sctx, 0, sizeof(*sctx));
     sctx->event_loop = event_loop;
     sctx->user_ctx = user_ctx;
-    sctx->on_accept = on_accept;
 
     return sctx;
 }
@@ -43,7 +41,7 @@ void cio_free_tcp_server(void *tcp_server)
     free(tcp_server);
 }
 
-static void on_accept(void *ctx, int fd, int flags)
+static void on_accept_impl(void *ctx, int fd, int flags)
 {
     struct tcp_server_ctx *sctx = ctx;
     int new_fd;
@@ -66,7 +64,8 @@ static void on_accept(void *ctx, int fd, int flags)
         return;
     }
 
-    if (!(new_connection = cio_new_tcp_connection_connected_fd(sctx->event_loop, sctx->user_ctx, new_fd))) {
+    new_connection = cio_new_tcp_connection_connected_fd(sctx->event_loop, sctx->user_ctx, new_fd);
+    if (!(new_connection)) {
         printf("on_accept: cio_new_tcp_connection_connected_fd: failed\n");
         close(new_fd);
         sctx->on_accept(NULL, sctx->user_ctx, CIO_UNKNOWN_ERROR);
@@ -76,36 +75,38 @@ static void on_accept(void *ctx, int fd, int flags)
     sctx->on_accept(new_connection, sctx->user_ctx, CIO_NO_ERROR);
 }
 
-void cio_tcp_server_serve(void *tcp_server, const char *addr, int port)
+void cio_tcp_server_async_accept(void *tcp_server, const char *addr, int port,
+    void (*on_accept)(void *connection, void *user_ctx, int ecode))
 {
     struct tcp_server_ctx *sctx = tcp_server;
     void *resolver = NULL;
     struct addrinfo ainfo;
     int ecode;
 
+    sctx->on_accept = on_accept;
     resolver = cio_new_resolver(addr, port, AF_UNSPEC, SOCK_STREAM, CIO_SERVER);
     if (!resolver)
         goto fail;
 
     while (cio_resolver_next_endpoint(resolver, &ainfo) == CIO_NO_ERROR) {
         if ((sctx->fd = socket(ainfo.ai_family, SOCK_STREAM, 0)) == -1) {
-            perror("cio_tcp_server_serve: socket()");
+            perror("cio_tcp_server_async_accept: socket()");
             continue;
         } else {
             if (bind(sctx->fd, ainfo.ai_addr, sizeof(*ainfo.ai_addr))) {
-                perror("cio_tcp_server_serve: bind");
+                perror("cio_tcp_server_async_accept: bind");
                 goto fail;
             }
             if (listen(sctx->fd, 128)) {
-                perror("cio_tcp_server_serve: listen");
+                perror("cio_tcp_server_async_accept: listen");
                 goto fail;
             }
             if (toggle_fd_nonblocking(sctx->fd, 1)) {
-                perror("cio_tcp_server_serve: toggle non-blocking");
+                perror("cio_tcp_server_async_accept: toggle non-blocking");
                 goto fail;
             }
-            if ((ecode = cio_event_loop_add_fd(sctx->event_loop, sctx->fd, CIO_FLAG_IN, sctx, on_accept))) {
-                cio_perror(ecode, "cio_tcp_server_serve: cio_event_loop_add_fd");
+            if ((ecode = cio_event_loop_add_fd(sctx->event_loop, sctx->fd, CIO_FLAG_IN, sctx, on_accept_impl))) {
+                cio_perror(ecode, "cio_tcp_server_async_accept: cio_event_loop_add_fd");
                 goto fail;
             }
             return;

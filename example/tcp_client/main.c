@@ -22,7 +22,7 @@ enum connection_result {
 
 struct connection_ctx {
     void *connection;
-    char file_name[BUF_SIZE];
+    char file_name[BUFSIZ];
     int size;
     int transferred;
     int fd;
@@ -89,7 +89,7 @@ static void on_read(void *ctx, int ecode, int bytes_read)
         goto fail;
     }
 
-    cctx->transferred += ntohl(*(int*)(cctx->buf));
+    cctx->transferred = ntohl(*(int*)(cctx->buf));
     printf("File %s: %d%%\n", cctx->file_name, (int) (((double) cctx->transferred / cctx->size) * 100));
 
     if (cctx->transferred == cctx->size) {
@@ -165,7 +165,6 @@ static void on_connect(void *ctx, int ecode)
 static void init_connection(void *event_loop, const char *addr, const char *path, size_t size)
 {
     struct connection_ctx *ctx;
-    char buf[BUF_SIZE];
     char *ptr;
     int port;
     size_t addrlen;
@@ -193,22 +192,17 @@ static void init_connection(void *event_loop, const char *addr, const char *path
         return;
     }
 
-    ptr = strstr(addr, ":");
-    if (!ptr || ptr == addr || *(ptr + 1) == '\0' || ((port = (int) strtol(ptr + 1, NULL, 10)) == 0 && errno != 0)) {
+    strncpy(ctx->file_name, path, BUFSIZ - 1);
+    ctx->file_name[BUFSIZ - 1] = '\0';
+
+    if (parse_addr_string(addr, ctx->buf, sizeof(ctx->buf), &port)) {
         printf("Invalid address string %s for file %s\n", addr, path);
         free_connection_ctx(ctx);
         return;
     }
 
-    strncpy(ctx->file_name, path, BUF_SIZE - 1);
-    ctx->file_name[BUF_SIZE - 1] = '\0';
-
-    addrlen = MIN((size_t) (ptr - addr), BUF_SIZE - 1);
-    strncpy(buf, addr, addrlen);
-    buf[addrlen] = '\0';
-
     add_connection(ctx);
-    cio_tcp_connection_async_connect(ctx->connection, buf, port, on_connect);
+    cio_tcp_connection_async_connect(ctx->connection, ctx->buf, port, on_connect);
 }
 
 static int do_work(void *event_loop, const char *addr, const char *path)
@@ -216,7 +210,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
     DIR *dir;
     struct dirent *entry;
     struct stat stat_buf;
-    char path_buf[BUF_SIZE];
+    char path_buf[BUFSIZ];
 
     if (stat(path, &stat_buf)) {
         printf("Stat failed for %s\n", path);
@@ -231,9 +225,9 @@ static int do_work(void *event_loop, const char *addr, const char *path)
             return -1;
         }
         while ((entry = readdir(dir)) != NULL) {
-            strncpy(path_buf, path, BUF_SIZE);
-            path_buf[BUF_SIZE - 1] = '\0';
-            strncat(path_buf, entry->d_name, BUF_SIZE - strlen(path_buf) - 1);
+            strncpy(path_buf, path, BUFSIZ);
+            path_buf[BUFSIZ - 1] = '\0';
+            strncat(path_buf, entry->d_name, BUFSIZ - strlen(path_buf) - 1);
             if (stat(path_buf, &stat_buf) || ((stat_buf.st_mode & S_IFMT) != S_IFREG)) {
                 printf("Invalid file %s\n", path_buf);
                 continue;
@@ -281,23 +275,23 @@ void wait_for_done(void *event_loop)
 int main(int argc, char *const argv[])
 {
     int opt;
-    char path_buf[BUF_SIZE];
-    char addr_buf[BUF_SIZE];
+    char path_buf[BUFSIZ];
+    char addr_buf[BUFSIZ];
     void *event_loop;
     struct connection_ctx *tmp;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    memset(path_buf, 0, BUF_SIZE);
-    memset(addr_buf, 0, BUF_SIZE);
+    memset(path_buf, 0, BUFSIZ);
+    memset(addr_buf, 0, BUFSIZ);
     while ((opt = getopt(argc, argv, "a:p:h")) != -1) {
         switch (opt) {
         case 'p':
-            strncpy(path_buf, optarg, BUF_SIZE - 1);
-            path_buf[BUF_SIZE - 1] = '\0';
+            strncpy(path_buf, optarg, BUFSIZ - 1);
+            path_buf[BUFSIZ - 1] = '\0';
             break;
         case 'a':
-            strncpy(addr_buf, optarg, BUF_SIZE - 1);
-            addr_buf[BUF_SIZE - 1] = '\0';
+            strncpy(addr_buf, optarg, BUFSIZ - 1);
+            addr_buf[BUFSIZ - 1] = '\0';
             break;
         case 'h':
             printf("Example tcp client. Sends file(s) from <path> to the specified <address>.\n" \
@@ -308,7 +302,7 @@ int main(int argc, char *const argv[])
     }
 
     if (!path_buf[0] || !addr_buf[0]) {
-        printf("Required options are mising. Run with -h to get help.\n");
+        printf("Required options mising. Run with -h to get help.\n");
         return EXIT_FAILURE;
     }
 
