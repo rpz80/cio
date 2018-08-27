@@ -48,7 +48,7 @@ static void on_accept_impl(void *ctx, int fd, int flags)
 
     if (!(flags & CIO_FLAG_IN)) {
         printf("on_accept poll error: %d\n", flags);
-        sctx->on_accept(NULL, sctx->user_ctx, flags);
+        sctx->on_accept(-1, sctx->user_ctx, flags);
         return;
     }
 
@@ -92,6 +92,7 @@ void cio_tcp_server_async_accept(void *tcp_server, const char *addr, int port,
                 cio_perror(ecode, "cio_tcp_server_async_accept: cio_event_loop_add_fd");
                 goto fail;
             }
+            cio_free_resolver(resolver);
             return;
         }
     }
@@ -99,5 +100,5 @@ void cio_tcp_server_async_accept(void *tcp_server, const char *addr, int port,
 fail:
     cio_free_resolver(resolver);
     close(sctx->fd);
-    sctx->on_accept(NULL, sctx->user_ctx, CIO_NOT_FOUND_ERROR);
+    sctx->on_accept(-1, sctx->user_ctx, CIO_NOT_FOUND_ERROR);
 }
