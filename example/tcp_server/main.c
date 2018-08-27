@@ -33,8 +33,12 @@ static char path_buf[BUFSIZ];
 
 static void free_connection_ctx(struct connection_ctx *ctx)
 {
-    cio_free_tcp_connection(ctx->connection);
-    free(ctx);
+    if (ctx) {
+        if (ctx->connection)
+            cio_free_tcp_connection(ctx->connection);
+            close(ctx->fd);
+        free(ctx);
+    }
 }
 
 static int setup_data_dir(const char *path)
@@ -66,9 +70,11 @@ static int prepare_file(struct connection_ctx *cctx)
 
     memset(path, 0, BUFSIZ);
     strncat(path, path_buf, BUFSIZ - 1);
-    strncat(path, cctx->file_name, BUFSIZ - strlen(path_buf) - 1);
+    if (path[strlen(path_buf) - 1] != '/')
+        strncat(path, "/", BUFSIZ - strlen(path) - 1);
+    strncat(path, cctx->file_name, BUFSIZ - strlen(path) - 1);
 
-    if ((cctx->fd = open(path, O_WRONLY, S_IRWXU)) == -1) {
+    if ((cctx->fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU)) == -1) {
         perror("open");
         return -1;
     }
@@ -83,6 +89,7 @@ static void on_write(void *ctx, int ecode)
     if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_write");
         free_connection_ctx(cctx);
+        return;
     }
 
     cio_tcp_connection_async_read(cctx->connection, cctx->buf, sizeof(cctx->buf), on_read);
@@ -90,7 +97,7 @@ static void on_write(void *ctx, int ecode)
 
 static void parse_buf(struct connection_ctx *cctx)
 {
-    int written;
+    int written, tmp;
 
     switch (cctx->state) {
     case name_len:
@@ -140,8 +147,9 @@ static void parse_buf(struct connection_ctx *cctx)
         cctx->transferred += written;
         cctx->buf_data_size = 0;
         cctx->buf_data_offset = 0;
-        cio_tcp_connection_async_write(cctx->connection, &cctx->transferred,
-            sizeof(cctx->transferred), on_write);
+        tmp = htonl(cctx->transferred);
+        memcpy(cctx->buf, &tmp, sizeof(tmp));
+        cio_tcp_connection_async_write(cctx->connection, &cctx->buf, sizeof(tmp), on_write);
         break;
     }
     return;
@@ -170,9 +178,11 @@ fail:
     free_connection_ctx(cctx);
 }
 
-static void on_accept(void *connection, void *user_ctx, int ecode)
+static void on_accept(int fd, void *user_ctx, int ecode)
 {
     struct connection_ctx *cctx;
+    void *connection = NULL;
+    void *event_loop = user_ctx;
 
     if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_accept");
@@ -182,12 +192,24 @@ static void on_accept(void *connection, void *user_ctx, int ecode)
     cctx = malloc(sizeof(*cctx));
     if (!cctx) {
         perror("on_accept: malloc");
-        return;
+        goto fail;
     }
     memset(cctx, 0, sizeof(*cctx));
-    cctx->connection = connection;
 
+    connection = cio_new_tcp_connection_connected_fd(event_loop, cctx, fd);
+    if (!connection) {
+        printf("on_accept: cio_new_tcp_connection_connected_fd: failed\n");
+        goto fail;
+    }
+
+    cctx->connection = connection;
     cio_tcp_connection_async_read(cctx->connection, cctx->buf, sizeof(cctx->buf), on_read);
+
+    return;
+
+fail:
+    close(fd);
+    free_connection_ctx(cctx);
 }
 
 int main(int argc, char *const argv[])
@@ -235,7 +257,7 @@ int main(int argc, char *const argv[])
         return EXIT_FAILURE;
     }
 
-    tcp_server = cio_new_tcp_server(event_loop, NULL);
+    tcp_server = cio_new_tcp_server(event_loop, event_loop);
     if (!tcp_server) {
         printf("Failed to create tcp_server instance. Bailing out.\n");
         cio_free_event_loop(event_loop);

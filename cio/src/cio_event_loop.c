@@ -137,7 +137,7 @@ static void pollset_cb(void *ctx, int fd, int flags)
                 el->need_stop = 1;
                 return;
             case WAKE_UP:
-                return;
+                continue;
             default:
                 assert(0);
                 ecode = CIO_READ_ERROR;
@@ -185,7 +185,7 @@ fail:
 
 int cio_event_loop_run(void *loop)
 {
-    struct event_loop *el = (struct event_loop *) loop;
+    struct event_loop *el = loop;
     int ecode = 0, cio_ecode = 0;
     int poll_timeout_ms = -1;
     long long now;

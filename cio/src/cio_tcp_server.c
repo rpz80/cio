@@ -15,7 +15,7 @@
 struct tcp_server_ctx {
     void *event_loop;
     void *user_ctx;
-    void (*on_accept)(void *connection, void *user_ctx, int ecode);
+    void (*on_accept)(int fd, void *user_ctx, int ecode);
     int fd;
 };
 
@@ -45,7 +45,6 @@ static void on_accept_impl(void *ctx, int fd, int flags)
 {
     struct tcp_server_ctx *sctx = ctx;
     int new_fd;
-    void *new_connection;
 
     if (!(flags & CIO_FLAG_IN)) {
         printf("on_accept poll error: %d\n", flags);
@@ -56,27 +55,11 @@ static void on_accept_impl(void *ctx, int fd, int flags)
     assert(fd == sctx->fd);
     new_fd = accept(fd, NULL, NULL);
 
-    if (new_fd == -1) {
-        if (errno != EWOULDBLOCK) {
-            perror("accept");
-            sctx->on_accept(NULL, sctx->user_ctx, CIO_UNKNOWN_ERROR);
-        }
-        return;
-    }
-
-    new_connection = cio_new_tcp_connection_connected_fd(sctx->event_loop, sctx->user_ctx, new_fd);
-    if (!(new_connection)) {
-        printf("on_accept: cio_new_tcp_connection_connected_fd: failed\n");
-        close(new_fd);
-        sctx->on_accept(NULL, sctx->user_ctx, CIO_UNKNOWN_ERROR);
-        return;
-    }
-
-    sctx->on_accept(new_connection, sctx->user_ctx, CIO_NO_ERROR);
+    sctx->on_accept(new_fd, sctx->user_ctx, CIO_NO_ERROR);
 }
 
 void cio_tcp_server_async_accept(void *tcp_server, const char *addr, int port,
-    void (*on_accept)(void *connection, void *user_ctx, int ecode))
+    void (*on_accept)(int fd, void *user_ctx, int ecode))
 {
     struct tcp_server_ctx *sctx = tcp_server;
     void *resolver = NULL;
