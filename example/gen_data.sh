@@ -19,11 +19,33 @@ do
     esac
 done
 
-rm -rf ${OUT_PATH}
-mkdir ${OUT_PATH}
+echo "Removing old data: ${OUT_PATH}"
+if rm -rf ${OUT_PATH}; then
+    echo "Success"
+    echo
+else
+    echo "Failure"
+    exit -1
+fi
 
+echo "Creating new data folder ${OUT_PATH}"
+if mkdir ${OUT_PATH}; then
+    echo "Success"
+    echo
+else
+    echo "Failure"
+    exit -1
+fi
+
+echo "Generating ${COUNT} files ${SIZE} Mb each..."
 BLOCK_COUNT=$(echo "((${SIZE}*1024*1024)/${BS})/1" | bc)
 for (( i=1; i<=${COUNT}; i++ ))
 do
-    dd if=/dev/zero of="${OUT_PATH}/${i}.raw" bs=4096 count=${BLOCK_COUNT}
+    if ! dd if=/dev/zero of="${OUT_PATH}/${i}.raw" bs=4096 count=${BLOCK_COUNT} > /dev/null 2>&1; then
+        echo "Failed to generate file"
+        exit -1
+    fi
+    printf "\r${i}"
 done
+echo
+echo "Done"
