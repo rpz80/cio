@@ -10,13 +10,13 @@ from pathlib import Path
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--path", default="/tmp/cio_example_in_data", 
+    parser.add_argument("-p", "--path", default="/tmp/cio_example_in_data",
                         help="path to the initial data folder")
-    parser.add_argument("-c", "--count", type=int, default=100, 
+    parser.add_argument("-c", "--count", type=int, default=100,
                         help="number of files to generate")
-    parser.add_argument("-s", "--size", type=int, default=100, 
+    parser.add_argument("-s", "--size", type=int, default=100,
                         help="size of each file in Mb")
-    parser.add_argument("-b", "--build_dir", default='.build', 
+    parser.add_argument("-b", "--build_dir", default='.build',
                         help="build directory relative to the project root")
     return parser.parse_args()
 
@@ -56,7 +56,8 @@ def build_all(args):
         if subprocess.run('ninja'.split()).returncode != 0:
             raise Exception('Ninja failed')
     elif shutil.which('make'):
-        if subprocess.run('cmake -G'.split() + ['Unix Makefiles'] + '-DwithExamples=ON ..'.split()).returncode != 0:
+        cmd = 'cmake -G'.split() + ['Unix Makefiles'] + '-DwithExamples=ON ..'.split()
+        if subprocess.run(cmd).returncode != 0:
             raise Exception('Cmake failed')
         if subprocess.run('make'.split()).returncode != 0:
             raise Exception('Make failed')
