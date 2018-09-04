@@ -57,7 +57,8 @@ def build_all(args):
         if subprocess.run('ninja'.split()).returncode != 0:
             raise Exception('Ninja failed')
     elif shutil.which('make'):
-        if subprocess.run('cmake -G'.split() + ['Unix Makefiles'] + '-DwithExamples=ON ..'.split()).returncode != 0:
+        cmd = 'cmake -G'.split() + ['Unix Makefiles'] + '-DwithExamples=ON ..'.split()
+        if subprocess.run(cmd).returncode != 0:
             raise Exception('Cmake failed')
         if subprocess.run('make'.split()).returncode != 0:
             raise Exception('Make failed')
@@ -76,6 +77,10 @@ def main():
         sys.exit(1)
     new_files_list = [str(i) + '.raw' for i in range(args.count)]
     prepare_initial_dir(args, new_files_list)
+    subprocess.run(
+        [os.path.join(args.build_dir, 'bin/tcp_server')] + '-p /tmp/out -a 0.0.0.0:23452'.split(),
+        capture_stdout=False)
+    print('server started')
 
 
 if __name__ == '__main__':
