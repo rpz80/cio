@@ -23,7 +23,7 @@ enum connection_result {
 struct connection_ctx {
     void *connection;
     char file_name[BUFSIZ];
-    int size;
+    ssize_t size;
     int transferred;
     int fd;
     char buf[4096];
@@ -62,9 +62,10 @@ void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_resul
 void free_connection_ctx(struct connection_ctx *ctx)
 {
     if (ctx) {
-        if (ctx->connection)
+        if (ctx->connection) {
             cio_free_tcp_connection(ctx->connection);
             close(ctx->fd);
+        }
         free(ctx);
     }
 }
@@ -123,7 +124,7 @@ static void send_file(struct connection_ctx *ctx, int send_header)
 {
     int offset = 0;
     int tmp;
-    int file_bytes_read, file_name_len;
+    ssize_t file_bytes_read, file_name_len;
 
     if (send_header) {
         file_name_len = strlen(ctx->file_name);

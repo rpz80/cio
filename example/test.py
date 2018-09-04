@@ -10,13 +10,13 @@ from pathlib import Path
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--path", default="/tmp/cio_example_in_data", 
+    parser.add_argument("-p", "--path", default="/tmp/cio_example_in_data",
                         help="path to the initial data folder")
-    parser.add_argument("-c", "--count", type=int, default=100, 
+    parser.add_argument("-c", "--count", type=int, default=100,
                         help="number of files to generate")
-    parser.add_argument("-s", "--size", type=int, default=100, 
+    parser.add_argument("-s", "--size", type=int, default=100,
                         help="size of each file in Mb")
-    parser.add_argument("-b", "--build_dir", default='.build', 
+    parser.add_argument("-b", "--build_dir", default='.build',
                         help="build directory relative to the project root")
     return parser.parse_args()
 
@@ -42,6 +42,7 @@ def prepare_initial_dir(args, new_files_list):
     print()
 
 
+
 def build_all(args):
     if not shutil.which('cmake'):
         raise Exception('Cmake not found')
@@ -63,6 +64,7 @@ def build_all(args):
     else:
         raise Exception('No build system found')
     os.chdir(str(project_dir))
+
 
 
 def main():
