@@ -75,6 +75,10 @@ def main():
         sys.exit(1)
     new_files_list = [str(i) + '.raw' for i in range(args.count)]
     prepare_initial_dir(args, new_files_list)
+    subprocess.run(
+        [os.path.join(args.build_dir, 'bin/tcp_server')] + '-p /tmp/out -a 0.0.0.0:23452'.split(),
+        capture_stdout=False)
+    print('server started')
 
 
 if __name__ == '__main__':
