@@ -8,6 +8,11 @@ import subprocess
 from pathlib import Path
 
 
+PORT = 23452
+WORK_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = str(Path(WORK_DIR).parent)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--path", default="/tmp/cio_example_in_data",
@@ -32,55 +37,62 @@ def prepare_initial_dir(args, new_files_list):
         else:
             new_files_list.remove(entry.name)
     for new_file in new_files_list:
-        print('\rWriting {}...'.format(new_file), end='')
+        print('\rWriting... {}'.format(new_file), end='')
         with open(os.path.join(args.path, new_file), 'wb') as f:
             written = 0
             while written < new_file_size:
                 write_size = min(len(pattern), new_file_size - written)
                 f.write(pattern[:write_size])
                 written += write_size
-    print()
+    if len(new_files_list) != 0:
+        print('\r' + ' '*30, end='')
+        print('\rWriting... Done'.format(new_file))
 
+
+def build_dir(args):
+    return os.path.join(PROJECT_DIR, args.build_dir)
 
 
 def build_all(args):
     if not shutil.which('cmake'):
         raise Exception('Cmake not found')
-    work_dir = os.path.realpath(__file__)
-    project_dir = Path(os.path.dirname(work_dir)).parent
-    build_dir = os.path.join(str(project_dir), args.build_dir)
-    os.chdir(build_dir)
-    os.remove('CMakeCache.txt')
+    os.chdir(build_dir(args))
+    if os.path.exists('CMakeCache.txt'):
+        os.remove('CMakeCache.txt')
     if shutil.which('ninja'):
-        if subprocess.run('cmake -G Ninja -DwithExamples=ON ..'.split()).returncode != 0:
+        if subprocess.run('cmake -G Ninja -DwithExamples=ON ..'.split(),
+                          stdout=subprocess.DEVNULL).returncode != 0:
             raise Exception('Cmake failed')
-        if subprocess.run('ninja'.split()).returncode != 0:
+        if subprocess.run('ninja'.split(), stdout=subprocess.DEVNULL).returncode != 0:
             raise Exception('Ninja failed')
     elif shutil.which('make'):
         cmd = 'cmake -G'.split() + ['Unix Makefiles'] + '-DwithExamples=ON ..'.split()
-        if subprocess.run(cmd).returncode != 0:
+        if subprocess.run(cmd, stdout=subprocess.DEVNULL).returncode != 0:
             raise Exception('Cmake failed')
-        if subprocess.run('make'.split()).returncode != 0:
+        if subprocess.run('make'.split(), stdout=subprocess.DEVNULL).returncode != 0:
             raise Exception('Make failed')
     else:
         raise Exception('No build system found')
-    os.chdir(str(project_dir))
+    os.chdir(PROJECT_DIR)
 
+
+def start_server(args):
+    print('Starting server on port {}...\r'.format(PORT), end='')
+    server_exe = os.path.join(build_dir(args), 'bin/tcp_server')
+    server_cmd = server_exe + ' -p /tmp/out -a 0.0.0.0:{}'.format(PORT)
+    subprocess.Popen(server_cmd.split(), stdout=subprocess.DEVNULL)
+    print('Starting server on port {}... Done'.format(PORT))
 
 
 def main():
     args = parse_args()
-    try:
-        build_all(args)
-    except Exception as e:
-        print('Build failed: {}'.format(e))
-        sys.exit(1)
+    print('Building...\r', end='')
+    build_all(args)
+    print('Building... Done')
     new_files_list = [str(i) + '.raw' for i in range(args.count)]
     prepare_initial_dir(args, new_files_list)
-    subprocess.run(
-        [os.path.join(args.build_dir, 'bin/tcp_server')] + '-p /tmp/out -a 0.0.0.0:23452'.split(),
-        capture_stdout=False)
-    print('server started')
+    start_server(args)
+    start_clients()
 
 
 if __name__ == '__main__':
