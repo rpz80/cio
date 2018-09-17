@@ -26,11 +26,17 @@ struct connection_ctx {
     ssize_t size;
     int transferred;
     int fd;
-    char buf[4096];
+    char write_buf[4096];
+    char read_buf[4096];
     int len;
     enum connection_result status;
     struct connection_ctx *next;
 };
+
+enum {
+    wait,
+    no_wait
+} mode;
 
 struct connection_ctx *connections;
 
@@ -88,12 +94,14 @@ static void on_read(void *ctx, int ecode, int bytes_read)
     }
 
     if (bytes_read != 4) {
-        printf("on_read: received message of unexpected len for file %s, closing\n", cctx->file_name);
+        printf("on_read: received message of unexpected len for file %s, closing\n",
+            cctx->file_name);
         goto fail;
     }
 
-    cctx->transferred = ntohl(*(int*)(cctx->buf));
-    printf("\rFile %s: %d%%", cctx->file_name, (int) (((double) cctx->transferred / cctx->size) * 100));
+    cctx->transferred = ntohl(*(int*)(cctx->read_buf));
+    printf("\rFile %s: %d%%", cctx->file_name,
+        (int) (((double) cctx->transferred / cctx->size) * 100));
 
     if (cctx->transferred == cctx->size) {
         connection_ctx_set_status(ctx, done);
@@ -101,7 +109,12 @@ static void on_read(void *ctx, int ecode, int bytes_read)
         return;
     }
 
-    send_file(ctx, 0);
+    if (mode == wait)
+        send_file(ctx, 0);
+    else
+        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
+            on_read);
+
     return;
 
 fail:
@@ -117,7 +130,11 @@ static void on_write(void *ctx, int ecode)
         return;
     }
 
-    cio_tcp_connection_async_read(cctx->connection, cctx->buf, sizeof(cctx->buf), on_read);
+    if (mode == wait)
+        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
+            on_read);
+    else
+        send_file(ctx, 0);
 }
 
 static void send_file(struct connection_ctx *ctx, int send_header)
@@ -129,17 +146,17 @@ static void send_file(struct connection_ctx *ctx, int send_header)
     if (send_header) {
         file_name_len = strlen(ctx->file_name);
         tmp = htonl(file_name_len);
-        memcpy(ctx->buf, &tmp, sizeof(tmp));
+        memcpy(ctx->write_buf, &tmp, sizeof(tmp));
         offset += sizeof(tmp);
-        tmp = MIN(file_name_len, sizeof(ctx->buf) - offset);
-        memcpy(ctx->buf + offset, ctx->file_name, tmp);
+        tmp = MIN(file_name_len, sizeof(ctx->write_buf) - offset);
+        memcpy(ctx->write_buf + offset, ctx->file_name, tmp);
         offset += tmp;
         tmp = htonl(ctx->size);
-        memcpy(ctx->buf + offset, &tmp, sizeof(tmp));
+        memcpy(ctx->write_buf + offset, &tmp, sizeof(tmp));
         offset += sizeof(tmp);
     }
 
-    file_bytes_read = read(ctx->fd, ctx->buf + offset, sizeof(ctx->buf) - offset);
+    file_bytes_read = read(ctx->fd, ctx->write_buf + offset, sizeof(ctx->write_buf) - offset);
     if (file_bytes_read == -1) {
         printf("Error reading file %s\n", ctx->file_name);
         connection_ctx_set_status(ctx, failed);
@@ -147,7 +164,7 @@ static void send_file(struct connection_ctx *ctx, int send_header)
     }
 
     offset += file_bytes_read;
-    cio_tcp_connection_async_write(ctx->connection, ctx->buf, offset, on_write);
+    cio_tcp_connection_async_write(ctx->connection, ctx->write_buf, offset, on_write);
 }
 
 static void on_connect(void *ctx, int ecode)
@@ -161,6 +178,8 @@ static void on_connect(void *ctx, int ecode)
     }
 
     send_file(ctx, 1);
+    if (mode == no_wait)
+        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf), on_read);
 }
 
 static void init_connection(void *event_loop, const char *addr, const char *full_path,
@@ -193,14 +212,14 @@ static void init_connection(void *event_loop, const char *addr, const char *full
     }
     strncat(ctx->file_name, file_name, BUFSIZ - 1);
 
-    if (parse_addr_string(addr, ctx->buf, sizeof(ctx->buf), &port)) {
+    if (parse_addr_string(addr, ctx->read_buf, sizeof(ctx->read_buf), &port)) {
         printf("Invalid address string %s for file %s\n", addr, full_path);
         free_connection_ctx(ctx);
         return;
     }
 
     add_connection(ctx);
-    cio_tcp_connection_async_connect(ctx->connection, ctx->buf, port, on_connect);
+    cio_tcp_connection_async_connect(ctx->connection, ctx->read_buf, port, on_connect);
 }
 
 static const char *file_name_from_path(const char *path)
@@ -295,7 +314,8 @@ int main(int argc, char *const argv[])
     setvbuf(stdout, NULL, _IONBF, 0);
     memset(path_buf, 0, BUFSIZ);
     memset(addr_buf, 0, BUFSIZ);
-    while ((opt = getopt(argc, argv, "a:p:h")) != -1) {
+    mode = no_wait;
+    while ((opt = getopt(argc, argv, "a:p:m:h")) != -1) {
         switch (opt) {
         case 'p':
             strncpy(path_buf, optarg, BUFSIZ - 1);
@@ -305,10 +325,15 @@ int main(int argc, char *const argv[])
             strncpy(addr_buf, optarg, BUFSIZ - 1);
             addr_buf[BUFSIZ - 1] = '\0';
             break;
+        case 'm':
+            if (strcmp(optarg, "wait") == 0)
+                mode = wait;
+            break;
         case 'h':
             printf("Example tcp client. Sends file(s) from <path> to the specified <address>.\n" \
                    " -a <host:port>\n" \
-                   " -p <path>  (Might be a single file or a directory)\n");
+                   " -p <path>  (Might be a single file or a directory)\n"
+                   " -m <mode>  {wait | no-wait} (Sequential write-read-write, default is 'no-wait')\n");
             return EXIT_SUCCESS;
         }
     }

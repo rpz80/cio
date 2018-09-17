@@ -5,6 +5,7 @@ import os
 import sys
 import shutil
 import subprocess
+import signal
 from pathlib import Path
 
 
@@ -25,6 +26,8 @@ def parse_args():
     parser.add_argument("-s", "--size", type=int, default=100,
                         help="size of each file in Mb")
     parser.add_argument("-b", "--build_dir", default='.build',
+                        help="build directory relative to the project root")
+    parser.add_argument("-m", "--mode", default='no-wait',
                         help="build directory relative to the project root")
     return parser.parse_args()
 
@@ -59,7 +62,10 @@ def build_dir(args):
 def build_all(args):
     if not shutil.which('cmake'):
         raise Exception('Cmake not found')
-    os.chdir(build_dir(args))
+    build_path = build_dir(args)
+    if not os.path.exists(build_path):
+        os.mkdir(build_path)
+    os.chdir(build_path)
     if os.path.exists('CMakeCache.txt'):
         os.remove('CMakeCache.txt')
     if shutil.which('ninja'):
@@ -80,19 +86,47 @@ def build_all(args):
 
 
 def start_server(args):
+    try:
+        subprocess.run('kill $(pidof tcp_server)', stdout=subprocess.DEVNULL)
+    except:
+        pass
     print('Starting server on port {}...\r'.format(args.port), end='')
     server_exe = os.path.join(build_dir(args), 'bin/tcp_server')
-    server_cmd = server_exe + ' -p {} -a 0.0.0.0:{}'.format(args.target_path, args.port)
-    subprocess.Popen(server_cmd.split(), stdout=subprocess.DEVNULL)
+    server_cmd = server_exe + ' -p {} -a 0.0.0.0:{} -m {}'.format(
+        args.target_path, args.port, args.mode)
+    log_file = open('server.log', 'w')
+    pid = subprocess.Popen(server_cmd.split(), stdout=log_file, stderr=log_file)
+    pid.log_file = log_file
     print('Starting server on port {}... Done'.format(args.port))
+    return pid
 
 
 def start_client(args):
     print('Starting client...\r', end='')
     client_exe = os.path.join(build_dir(args), 'bin/tcp_client')
-    client_cmd = client_exe + ' -p {} -a 0.0.0.0:{}'.format(args.source_path, args.port)
-    subprocess.Popen(client_cmd.split())
+    client_cmd = client_exe + ' -p {} -a 127.0.0.1:{} -m {}'.format(
+        args.source_path, args.port, args.mode)
+    log_file = open('client.log', 'w')
+    pid = subprocess.Popen(client_cmd.split(), stdout=log_file, stderr=log_file)
+    pid.log_file = log_file
     print('Starting client... Done')
+    return pid
+
+
+def wait_for_done(client_pid, server_pid):
+    ret_code = client_pid.wait()
+    if ret_code != 0:
+        print('Client exited with failure')
+    else:
+        print('Client exited with success')
+    client_pid.log_file.flush()
+    client_pid.log_file.close()
+    print('Stopping server...\r')
+    server_pid.send_signal(signal.SIGTERM)
+    server_pid.wait()
+    server_pid.log_file.flush()
+    server_pid.log_file.close()
+    print('Stopping server... Done')
 
 
 def main():
@@ -102,8 +136,9 @@ def main():
     print('Building... Done')
     new_files_list = [str(i) + '.raw' for i in range(args.count)]
     prepare_initial_dir(args, new_files_list)
-    start_server(args)
-    start_client(args)
+    server_pid = start_server(args)
+    client_pid = start_client(args)
+    wait_for_done(client_pid, server_pid)
 
 
 if __name__ == '__main__':
