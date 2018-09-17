@@ -5,3 +5,5 @@ build/
 *.swp
 config.h
 3rdparty/
+client.log
+server.log

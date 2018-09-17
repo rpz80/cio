@@ -11,6 +11,7 @@ from pathlib import Path
 
 WORK_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = str(Path(WORK_DIR).parent)
+EXAMPLE_DIR = os.path.join(PROJECT_DIR, 'example')
 
 
 def parse_args():
@@ -82,14 +83,17 @@ def build_all(args):
             raise Exception('Make failed')
     else:
         raise Exception('No build system found')
-    os.chdir(PROJECT_DIR)
+    os.chdir(EXAMPLE_DIR)
 
 
 def start_server(args):
-    try:
-        subprocess.run('kill $(pidof tcp_server)', stdout=subprocess.DEVNULL)
-    except:
-        pass
+    pidof_result = subprocess.run('pidof tcp_server'.split(), stdout=subprocess.PIPE)
+    server_pid = pidof_result.stdout
+    if server_pid and len(server_pid) != 0:
+        print('Server instance is already running. Stopping...\r', end='')
+        subprocess.run('kill {}'.format(server_pid.decode('ascii').strip()).split(),
+                       stdout=subprocess.DEVNULL)
+        print('Server instance is already running. Stopping... Done')
     print('Starting server on port {}...\r'.format(args.port), end='')
     server_exe = os.path.join(build_dir(args), 'bin/tcp_server')
     server_cmd = server_exe + ' -p {} -a 0.0.0.0:{} -m {}'.format(
