@@ -69,12 +69,7 @@ static int prepare_file(struct connection_ctx *cctx)
 {
     char path[BUFSIZ];
 
-    memset(path, 0, BUFSIZ);
-    strncat(path, path_buf, BUFSIZ - 1);
-    if (path[strlen(path_buf) - 1] != '/')
-        strncat(path, "/", BUFSIZ - strlen(path) - 1);
-    strncat(path, cctx->file_name, BUFSIZ - strlen(path) - 1);
-
+    path_join(path_buf, cctx->file_name, path, BUFSIZ);
     if ((cctx->fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU)) == -1) {
         perror("open");
         return -1;

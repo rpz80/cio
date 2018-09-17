@@ -203,7 +203,7 @@ static void init_connection(void *event_loop, const char *addr, const char *full
     cio_tcp_connection_async_connect(ctx->connection, ctx->buf, port, on_connect);
 }
 
-const char *file_name_from_path(const char *path)
+static const char *file_name_from_path(const char *path)
 {
     const char *ptr = path + strlen(path);
 
@@ -239,9 +239,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
         while ((entry = readdir(dir)) != NULL) {
             if (memcmp(entry->d_name, ".", 1) == 0 || memcmp(entry->d_name, "..", 2) == 0)
                 continue;
-            memset(path_buf, 0, BUFSIZ);
-            strncat(path_buf, path, BUFSIZ - 1);
-            strncat(path_buf, entry->d_name, BUFSIZ - strlen(path_buf) - 1);
+            path_join(path, entry->d_name, path_buf, BUFSIZ);
             if (stat(path_buf, &stat_buf) || ((stat_buf.st_mode & S_IFMT) != S_IFREG)) {
                 printf("Invalid file %s\n", path_buf);
                 continue;

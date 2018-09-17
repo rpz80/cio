@@ -8,15 +8,18 @@ import subprocess
 from pathlib import Path
 
 
-PORT = 23452
 WORK_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = str(Path(WORK_DIR).parent)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--path", default="/tmp/cio_example_in_data",
-                        help="path to the initial data folder")
+    parser.add_argument("--source_path", default="/tmp/cio_example_in_data",
+                        help="path to the data folder client will use to get files from")
+    parser.add_argument("--target_path", default="/tmp/cio_example_out_data",
+                        help="path to the data folder server will use to store received data into")
+    parser.add_argument("--port", type=int, default=23452,
+                        help="tcp port to use")
     parser.add_argument("-c", "--count", type=int, default=100,
                         help="number of files to generate")
     parser.add_argument("-s", "--size", type=int, default=100,
@@ -29,16 +32,16 @@ def parse_args():
 def prepare_initial_dir(args, new_files_list):
     new_file_size = args.size*1024*1024
     pattern = b'hello'*1024*1024
-    if not os.path.exists(args.path):
-        os.mkdir(args.path)
-    for entry in os.scandir(args.path):
+    if not os.path.exists(args.source_path):
+        os.mkdir(args.source_path)
+    for entry in os.scandir(args.source_path):
         if entry.name not in new_files_list or new_file_size != entry.stat().st_size:
-            os.remove(os.path.join(args.path, entry.name))
+            os.remove(os.path.join(args.source_path, entry.name))
         else:
             new_files_list.remove(entry.name)
     for new_file in new_files_list:
         print('\rWriting... {}'.format(new_file), end='')
-        with open(os.path.join(args.path, new_file), 'wb') as f:
+        with open(os.path.join(args.source_path, new_file), 'wb') as f:
             written = 0
             while written < new_file_size:
                 write_size = min(len(pattern), new_file_size - written)
@@ -77,11 +80,19 @@ def build_all(args):
 
 
 def start_server(args):
-    print('Starting server on port {}...\r'.format(PORT), end='')
+    print('Starting server on port {}...\r'.format(args.port), end='')
     server_exe = os.path.join(build_dir(args), 'bin/tcp_server')
-    server_cmd = server_exe + ' -p /tmp/out -a 0.0.0.0:{}'.format(PORT)
+    server_cmd = server_exe + ' -p {} -a 0.0.0.0:{}'.format(args.target_path, args.port)
     subprocess.Popen(server_cmd.split(), stdout=subprocess.DEVNULL)
-    print('Starting server on port {}... Done'.format(PORT))
+    print('Starting server on port {}... Done'.format(args.port))
+
+
+def start_client(args):
+    print('Starting client...\r', end='')
+    client_exe = os.path.join(build_dir(args), 'bin/tcp_client')
+    client_cmd = client_exe + ' -p {} -a 0.0.0.0:{}'.format(args.source_path, args.port)
+    subprocess.Popen(client_cmd.split())
+    print('Starting client... Done')
 
 
 def main():
@@ -92,7 +103,7 @@ def main():
     new_files_list = [str(i) + '.raw' for i in range(args.count)]
     prepare_initial_dir(args, new_files_list)
     start_server(args)
-    start_clients()
+    start_client(args)
 
 
 if __name__ == '__main__':
