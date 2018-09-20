@@ -2,7 +2,7 @@
 #include "event_loop_ut.h"
 #include "int_hash_set_ut.h"
 #include "struct_hash_set_ut.h"
-#include "tcp_server_client_ut.h"
+#include "tcp_connection_ut.h"
 #include <ct.h>
 
 int main(int argc, char *argv[])
@@ -23,10 +23,6 @@ int main(int argc, char *argv[])
         TEST(test_event_loop_timers),
     };
 
-    struct ct_ut tcp_server_client_tests[] = {
-        TEST(test_tcp_server_client)
-    };
-
     struct ct_ut hash_set_tests[] = {
         TEST_SETUP_TEARDOWN(test_int_hash_set_w_release, setup_int_hash_set_tests_with_release,
             teardown_int_hash_set_tests),
@@ -35,12 +31,16 @@ int main(int argc, char *argv[])
         TEST_SETUP_TEARDOWN(test_int_hash_set_linked_list,
             setup_int_hash_set_tests_linked_list, teardown_int_hash_set_tests)
     };
+    
+    struct ct_ut tcp_connection_tests[] = {
+        TEST(test_new_tcp_connection)
+    };
 
     result = RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);
     result |= RUN_TESTS(event_loop_tests, setup_event_loop_tests, teardown_event_loop_tests);
     result |= RUN_TESTS(hash_set_tests, NULL, NULL);
-    result |= RUN_TESTS(tcp_server_client_tests, setup_tcp_server_client_tests,
-        teardown_tcp_server_client_tests);
+    result |= RUN_TESTS(tcp_connection_tests, setup_tcp_connnection_tests,
+                        teardown_tcp_connnection_tests);
 
     return result;
 }

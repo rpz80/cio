@@ -87,6 +87,8 @@ static void free_all_wrappers(struct wrapper_ctx *root_wrapper_ctx)
 struct tcp_connection_ctx {
     void *event_loop;
     void *user_ctx;
+    void *write_ctx;
+    void *read_ctx;
     int fd;
     enum connection_state cstate;
     struct wrapper_ctx *wrapper_ctx;
@@ -269,7 +271,11 @@ static void connect_ctx_try_next(struct connect_ctx *connect_ctx)
     if ((cio_ecode = cio_resolver_next_endpoint(connect_ctx->resolver, &ainfo)))
         goto fail;
 
-    close(tcp_connection_ctx->fd);
+    if (tcp_connection_ctx->fd != -1) {
+        close(tcp_connection_ctx->fd);
+        cio_event_loop_remove_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd);
+    }
+    
     if ((tcp_connection_ctx->fd = socket(ainfo.ai_family, ainfo.ai_socktype, 0)) == -1) {
         system_ecode = errno;
         goto fail;
@@ -292,7 +298,7 @@ static void connect_ctx_try_next(struct connect_ctx *connect_ctx)
         break;
     case EINPROGRESS:
         cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd,
-                                          CIO_FLAG_OUT, connect_ctx, connect_ctx_event_loop_cb);
+            CIO_FLAG_OUT, connect_ctx, connect_ctx_event_loop_cb);
         if (cio_ecode)
             goto fail;
         break;
@@ -458,6 +464,11 @@ static void do_write(struct write_ctx *write_ctx, int do_remove_add)
             switch (system_ecode) {
             case EWOULDBLOCK:
                 if (do_remove_add) {
+                    assert(!tcp_connection_ctx->write_ctx);
+                    if (tcp_connection_ctx->write_ctx) {
+                        cio_ecode = CIO_ALREADY_EXISTS_ERROR; /* TODO: Add new error code? */
+                        goto fail;
+                    }
                     cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
                         tcp_connection_ctx->fd, CIO_FLAG_OUT, write_ctx, write_ctx_event_loop_cb);
                     if (cio_ecode)
