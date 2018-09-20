@@ -1,3 +1,7 @@
+/**
+ * TODO: Write.
+ */
+
 #include "cio_tcp_connection.h"
 #include "cio_event_loop.h"
 #include "cio_resolver.h"
@@ -28,6 +32,15 @@ struct wrapper_ctx {
     struct wrapper_ctx *next;
 };
 
+/**
+ * Create new wrapper_ctx and add it to the list of the existing ones.
+ * ctx - 'real' context, for example associated with the read or write operation.
+ * on_destroy - function to be called when connection object is being destroyed. In this function
+ * 'real' context should be informed about connection destruction. This is basically done by setting
+ * CONNECTION ptr to the NULL. This ptr should be checked in the corresponding callbacks and these
+ * callbacks should exit immediately in the case if it's NULL, since the object has already been
+ * destroyed.
+ */
 static void *new_wrapper_ctx(struct wrapper_ctx **root, void *ctx, void (*on_destroy)(void *ctx))
 {
     struct wrapper_ctx *new_wrapper_ctx;
@@ -53,6 +66,9 @@ static void *new_wrapper_ctx(struct wrapper_ctx **root, void *ctx, void (*on_des
     return new_wrapper_ctx;
 }
 
+/**
+ * Call 'on_destroy' callbacks and destroys wrapper_ctx linked list.
+ */
 static void free_all_wrappers(struct wrapper_ctx *root_wrapper_ctx)
 {
     struct wrapper_ctx *cur_wrapper_ctx = root_wrapper_ctx;
@@ -130,7 +146,8 @@ void cio_free_tcp_connection(void *tcp_connection)
     cio_event_loop_post(tctx->event_loop, 0, tctx, free_tcp_connection_impl);
 }
 
-static void tcp_connection_remove_wrapper_by_posted_ctx(struct tcp_connection_ctx *tcp_connection_ctx,
+static void tcp_connection_remove_wrapper_by_posted_ctx(
+    struct tcp_connection_ctx *tcp_connection_ctx,
     void *posted_ctx)
 {
     struct wrapper_ctx *wrapper_ctx, *tmp_wrapper_ctx;
@@ -156,6 +173,9 @@ static void tcp_connection_remove_wrapper_by_posted_ctx(struct tcp_connection_ct
     }
 }
 
+/**
+ * Context to be posted to the event_loop along with CONNECT_IMPL function
+ */
 struct connect_ctx {
     struct tcp_connection_ctx *tcp_connection;
     void (*on_connect)(void *ctx, int ecode);
@@ -213,8 +233,8 @@ static void connect_ctx_on_destroy(void *ctx)
     connect_ctx->tcp_connection = NULL;
 }
 
-static struct connect_ctx *new_connect_ctx(struct tcp_connection_ctx *tcp_connection, const char *addr,
-    int port, void (*on_connect)(void *ctx, int ecode))
+static struct connect_ctx *new_connect_ctx(struct tcp_connection_ctx *tcp_connection,
+    const char *addr, int port, void (*on_connect)(void *ctx, int ecode))
 {
     struct connect_ctx *connect_ctx;
 
@@ -224,8 +244,7 @@ static struct connect_ctx *new_connect_ctx(struct tcp_connection_ctx *tcp_connec
 
     connect_ctx->tcp_connection = tcp_connection;
     connect_ctx->on_connect = on_connect;
-    connect_ctx->resolver = cio_new_resolver(addr, port, AF_UNSPEC, SOCK_STREAM,
-        CIO_CLIENT);
+    connect_ctx->resolver = cio_new_resolver(addr, port, AF_UNSPEC, SOCK_STREAM, CIO_CLIENT);
     if (!connect_ctx->resolver) {
         free(connect_ctx);
         return NULL;
@@ -272,9 +291,8 @@ static void connect_ctx_try_next(struct connect_ctx *connect_ctx)
         connect_ctx_cleanup(connect_ctx, 0, CIO_NO_ERROR);
         break;
     case EINPROGRESS:
-        cio_event_loop_remove_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd);
-        cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd, CIO_FLAG_OUT,
-            connect_ctx, connect_ctx_event_loop_cb);
+        cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd,
+                                          CIO_FLAG_OUT, connect_ctx, connect_ctx_event_loop_cb);
         if (cio_ecode)
             goto fail;
         break;
@@ -384,7 +402,6 @@ static void write_ctx_cleanup(struct write_ctx *write_ctx, int failed, int cio_e
 {
     struct tcp_connection_ctx *tcp_connection_ctx = write_ctx->tcp_connection;
 
-    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd);
     if (failed) {
         close(tcp_connection_ctx->fd);
         tcp_connection_ctx->cstate = CIO_CS_ERROR;
@@ -441,8 +458,6 @@ static void do_write(struct write_ctx *write_ctx, int do_remove_add)
             switch (system_ecode) {
             case EWOULDBLOCK:
                 if (do_remove_add) {
-                    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop,
-                        tcp_connection_ctx->fd);
                     cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
                         tcp_connection_ctx->fd, CIO_FLAG_OUT, write_ctx, write_ctx_event_loop_cb);
                     if (cio_ecode)
@@ -559,7 +574,6 @@ static void read_ctx_cleanup(struct read_ctx *read_ctx, int failed, int cio_erro
 {
     struct tcp_connection_ctx *tcp_connection_ctx = read_ctx->tcp_connection;
 
-    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd);
     if (failed) {
         close(tcp_connection_ctx->fd);
         tcp_connection_ctx->cstate = CIO_CS_ERROR;
@@ -608,8 +622,6 @@ static void do_read(struct read_ctx *read_ctx, int do_remove_add)
         switch (system_ecode) {
         case EWOULDBLOCK:
             if (do_remove_add) {
-                cio_event_loop_remove_fd(tcp_connection_ctx->event_loop,
-                    tcp_connection_ctx->fd);
                 cio_ecode = cio_event_loop_add_fd(tcp_connection_ctx->event_loop,
                     tcp_connection_ctx->fd, CIO_FLAG_IN, read_ctx, read_ctx_event_loop_cb);
                 if (cio_ecode)

@@ -34,8 +34,8 @@ struct connection_ctx {
 };
 
 enum {
-    wait,
-    no_wait
+    MODE_ASYNC,
+    MODE_SEQ
 } mode;
 
 struct connection_ctx *connections;
@@ -109,7 +109,7 @@ static void on_read(void *ctx, int ecode, int bytes_read)
         return;
     }
 
-    if (mode == wait)
+    if (mode == MODE_SEQ)
         send_file(ctx, 0);
     else
         cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
@@ -130,7 +130,7 @@ static void on_write(void *ctx, int ecode)
         return;
     }
 
-    if (mode == wait)
+    if (mode == MODE_SEQ)
         cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
             on_read);
     else
@@ -178,7 +178,7 @@ static void on_connect(void *ctx, int ecode)
     }
 
     send_file(ctx, 1);
-    if (mode == no_wait)
+    if (mode == MODE_ASYNC)
         cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf), on_read);
 }
 
@@ -314,7 +314,7 @@ int main(int argc, char *const argv[])
     setvbuf(stdout, NULL, _IONBF, 0);
     memset(path_buf, 0, BUFSIZ);
     memset(addr_buf, 0, BUFSIZ);
-    mode = no_wait;
+    mode = MODE_ASYNC;
     while ((opt = getopt(argc, argv, "a:p:m:h")) != -1) {
         switch (opt) {
         case 'p':
@@ -326,14 +326,14 @@ int main(int argc, char *const argv[])
             addr_buf[BUFSIZ - 1] = '\0';
             break;
         case 'm':
-            if (strcmp(optarg, "wait") == 0)
-                mode = wait;
+            if (strcmp(optarg, "seq") == 0)
+                mode = MODE_SEQ;
             break;
         case 'h':
             printf("Example tcp client. Sends file(s) from <path> to the specified <address>.\n" \
                    " -a <host:port>\n" \
                    " -p <path>  (Might be a single file or a directory)\n"
-                   " -m <mode>  {wait | no-wait} (Sequential write-read-write, default is 'no-wait')\n");
+                   " -m <mode>  {seq | async} (write-read-write mode, default is 'async')\n");
             return EXIT_SUCCESS;
         }
     }

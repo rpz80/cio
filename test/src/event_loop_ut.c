@@ -88,8 +88,6 @@ fail:
     return ecode;
 }
 
-/**************************************************************************************************/
-
 static const char send_buf[] = "hello";
 
 static void on_read(void *ctx, int fd, int flags)
@@ -254,8 +252,6 @@ fail:
 finally:
     pthread_mutex_unlock(&lctx->mutex);
 }
-
-/**************************************************************************************************/
 
 void test_event_loop_add_remove(void **ctx)
 {
