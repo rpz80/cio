@@ -253,7 +253,7 @@ int main(int argc, char *const argv[])
         return EXIT_FAILURE;
     }
 
-    tcp_server = cio_new_tcp_server(event_loop, event_loop);
+    tcp_server = cio_new_tcp_acceptor(event_loop, event_loop);
     if (!tcp_server) {
         printf("Failed to create tcp_server instance. Bailing out.\n");
         cio_free_event_loop(event_loop);
@@ -262,14 +262,14 @@ int main(int argc, char *const argv[])
 
     if (parse_addr_string(addr_buf_option, host_addr, BUFSIZ, &port)) {
         printf("Invalid address: %s\n", addr_buf_option);
-        cio_free_tcp_server(tcp_server);
+        cio_free_tcp_acceptor(tcp_server);
         cio_free_event_loop(event_loop);
         return EXIT_FAILURE;
     }
 
-    cio_tcp_server_async_accept(tcp_server, host_addr, port, on_accept);
+    cio_tcp_acceptor_async_accept(tcp_server, host_addr, port, on_accept);
     pthread_join(event_loop_thread, &thread_result);
-    cio_free_tcp_server(tcp_server);
+    cio_free_tcp_acceptor(tcp_server);
     cio_free_event_loop(event_loop);
 
     return EXIT_SUCCESS;

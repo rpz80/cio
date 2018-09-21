@@ -19,7 +19,7 @@ struct tcp_server_ctx {
     int fd;
 };
 
-void *cio_new_tcp_server(void *event_loop, void *user_ctx)
+void *cio_new_tcp_acceptor(void *event_loop, void *user_ctx)
 {
     struct tcp_server_ctx *sctx;
 
@@ -34,7 +34,7 @@ void *cio_new_tcp_server(void *event_loop, void *user_ctx)
     return sctx;
 }
 
-void cio_free_tcp_server(void *tcp_server)
+void cio_free_tcp_acceptor(void *tcp_server)
 {
     struct tcp_server_ctx *sctx = tcp_server;
     cio_event_loop_remove_fd(sctx->event_loop, sctx->fd);
@@ -58,7 +58,7 @@ static void on_accept_impl(void *ctx, int fd, int flags)
     sctx->on_accept(new_fd, sctx->user_ctx, CIO_NO_ERROR);
 }
 
-void cio_tcp_server_async_accept(void *tcp_server, const char *addr, int port,
+void cio_tcp_acceptor_async_accept(void *tcp_server, const char *addr, int port,
     void (*on_accept)(int fd, void *user_ctx, int ecode))
 {
     struct tcp_server_ctx *sctx = tcp_server;
