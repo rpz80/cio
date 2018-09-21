@@ -4,7 +4,7 @@
 
 #include "tcp_connection_ut.h"
 #include <cio_tcp_connection.h>
-#include <cio_tcp_server.h>
+#include <cio_tcp_acceptor.h>
 #include <cio_event_loop.h>
 #include <ct.h>
 #include <stdlib.h>
@@ -17,7 +17,7 @@ struct connection_tests_ctx {
 };
 
 static const char *const VALID_SERVER_ADDR = "0.0.0.0";
-static const char *const VALID_SERVER_PORT = "0.0.0.0";
+static const int VALID_SERVER_PORT = 23654;
 
 /**
  * Preparational stuff.

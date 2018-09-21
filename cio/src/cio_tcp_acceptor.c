@@ -1,4 +1,4 @@
-#include "cio_tcp_server.h"
+#include "cio_tcp_acceptor.h"
 #include "cio_resolver.h"
 #include "cio_event_loop.h"
 #include "cio_common.h"
@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-struct tcp_server_ctx {
+struct tcp_acceptor_ctx {
     void *event_loop;
     void *user_ctx;
     void (*on_accept)(int fd, void *user_ctx, int ecode);
@@ -21,7 +21,7 @@ struct tcp_server_ctx {
 
 void *cio_new_tcp_acceptor(void *event_loop, void *user_ctx)
 {
-    struct tcp_server_ctx *sctx;
+    struct tcp_acceptor_ctx *sctx;
 
     sctx = malloc(sizeof(*sctx));
     if (!sctx)
@@ -36,14 +36,14 @@ void *cio_new_tcp_acceptor(void *event_loop, void *user_ctx)
 
 void cio_free_tcp_acceptor(void *tcp_server)
 {
-    struct tcp_server_ctx *sctx = tcp_server;
+    struct tcp_acceptor_ctx *sctx = tcp_server;
     cio_event_loop_remove_fd(sctx->event_loop, sctx->fd);
     free(tcp_server);
 }
 
 static void on_accept_impl(void *ctx, int fd, int flags)
 {
-    struct tcp_server_ctx *sctx = ctx;
+    struct tcp_acceptor_ctx *sctx = ctx;
     int new_fd;
 
     if (!(flags & CIO_FLAG_IN)) {
@@ -61,7 +61,7 @@ static void on_accept_impl(void *ctx, int fd, int flags)
 void cio_tcp_acceptor_async_accept(void *tcp_server, const char *addr, int port,
     void (*on_accept)(int fd, void *user_ctx, int ecode))
 {
-    struct tcp_server_ctx *sctx = tcp_server;
+    struct tcp_acceptor_ctx *sctx = tcp_server;
     void *resolver = NULL;
     struct addrinfo ainfo;
     int ecode;
