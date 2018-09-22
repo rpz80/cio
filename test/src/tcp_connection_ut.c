@@ -1,5 +1,8 @@
 /**
- * cio_tcp_connection test suite.
+ * cio_tcp_connection test suite. Test server is used to test connection. It is based on the
+ * cio_tcp_acceptor and cio_tcp_connection. It echoes back what it receives from the client. Also
+ * it may start sending messages right after the connection has been established to test full duplex
+ * capabilities.
  */
 
 #include "tcp_connection_ut.h"
@@ -10,20 +13,63 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Test server code.
+ */
+struct test_server_ctx {
+    void *connection;
+    void *acceptor;
+    char read_buf[BUFSIZ];
+    char write_buf[BUFSIZ];
+    int duplex_mode_on;
+};
+
+static void free_server_ctx(struct test_server_ctx *server_ctx)
+{
+    if (server_ctx) {
+        cio_free_tcp_acceptor(server_ctx->acceptor);
+        free(server_ctx);
+    }
+}
+
+static struct test_server_ctx *new_test_server_ctx(void *event_loop, void *user_ctx)
+{
+    struct test_server_ctx *server_ctx;
+    
+    if (!(server_ctx = malloc(sizeof(*server_ctx))))
+        goto fail;
+    
+    memset(server_ctx, 0, sizeof(*server_ctx));
+    if (!(server_ctx->acceptor = cio_new_tcp_acceptor(event_loop, user_ctx)))
+        goto fail;
+    
+    return server_ctx;
+    
+fail:
+    free_server_ctx(server_ctx);
+    return NULL;
+}
+
+/**
+ * Tests context.
+ */
 struct connection_tests_ctx {
     void *connection;
-    void *tcp_server;
+    struct test_server_ctx *test_server_ctx;
     void *event_loop;
 };
 
 static const char *const VALID_SERVER_ADDR = "0.0.0.0";
 static const int VALID_SERVER_PORT = 23654;
 
-/**
- * Preparational stuff.
- */
-
-static void free_connection_tests_ctx(struct connection_tests_ctx *test_ctx);
+static void free_connection_tests_ctx(struct connection_tests_ctx *test_ctx)
+{
+    if (test_ctx) {
+        cio_free_tcp_connection(test_ctx->connection);
+        free_server_ctx(test_ctx->test_server_ctx);
+        cio_free_event_loop(test_ctx->event_loop);
+    }
+}
 
 static struct connection_tests_ctx *new_connection_tests_ctx()
 {
@@ -39,21 +85,14 @@ static struct connection_tests_ctx *new_connection_tests_ctx()
     
     if (!(test_ctx->connection = cio_new_tcp_connection(test_ctx->event_loop, test_ctx)))
         goto fail;
+    
+    test_ctx->test_server_ctx = malloc(
 
     return test_ctx;
     
 fail:
     free_connection_tests_ctx(test_ctx);
     return NULL;
-}
-
-static void free_connection_tests_ctx(struct connection_tests_ctx *test_ctx)
-{
-    if (test_ctx) {
-        cio_free_tcp_connection(test_ctx->connection);
-        cio_free_tcp_acceptor(test_ctx->tcp_server);
-        cio_free_event_loop(test_ctx->event_loop);
-    }
 }
 
 int setup_tcp_connnection_tests(void **ctx)
@@ -72,22 +111,6 @@ int teardown_tcp_connnection_tests(void **ctx)
 /**
  * Assertive, preconditional and conditional auxiliary functions.
  */
-
-/**
- * Test server related code. It echoes back what it receives from the client. Also it may start
- * sending messages right after the connection has been established to test full duplex
- * capabilities.
- */
-
-struct test_server_ctx {
-    struct connection_tests_ctx *test_ctx;
-    const char *addr;
-    int port;
-    int duplex_mode_on;
-};
-
-static void new_test_server_ctx();
-static void free_test_server_ctx();
 
 static void given_echo_tcp_server_started(struct test_server_ctx *test_server_ctx)
 {

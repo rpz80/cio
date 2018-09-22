@@ -38,7 +38,9 @@ static void *new_pollset()
 
 static void free_pollset(void *pollset)
 {
-    struct pollset *ps = (struct pollset *) pollset;
+    struct pollset *ps = pollset;
+    if (!ps)
+        return;
     free(ps->pollfds);
     free(pollset);
 }

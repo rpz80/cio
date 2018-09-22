@@ -91,6 +91,9 @@ fail:
 void cio_free_resolver(void *resolver)
 {
     struct resolver_ctx *rctx = resolver;
+    
+    if (!rctx)
+        return;
 
     if (rctx->root)
         freeaddrinfo(rctx->root);

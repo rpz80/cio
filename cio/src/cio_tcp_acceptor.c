@@ -37,6 +37,9 @@ void *cio_new_tcp_acceptor(void *event_loop, void *user_ctx)
 void cio_free_tcp_acceptor(void *tcp_server)
 {
     struct tcp_acceptor_ctx *sctx = tcp_server;
+
+    if (!tcp_server)
+        return;    
     cio_event_loop_remove_fd(sctx->event_loop, sctx->fd);
     free(tcp_server);
 }

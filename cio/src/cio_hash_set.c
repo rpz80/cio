@@ -147,9 +147,12 @@ void *cio_new_hash_set(unsigned capacity, int (*cmp)(const void *, const void *)
 
 void cio_free_hash_set(void *set)
 {
-    struct hset *s = (struct hset *)set;
+    struct hset *s = set;
     int i;
 
+    if (!s)
+        return;
+    
     for (i = 0; i < s->capacity; ++i) {
         if (s->nodes[i])
             free_node(s->nodes[i], s->release);

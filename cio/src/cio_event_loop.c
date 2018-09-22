@@ -100,14 +100,19 @@ fail:
 
 void cio_free_event_loop(void *loop)
 {
-    struct event_loop *el = (struct event_loop *) loop;
-    struct timer_cb_ctx *tctx = el->timer_actions, *tmp_tctx;
+    struct event_loop *el = loop;
+    struct timer_cb_ctx *tctx, *tmp_tctx;
 
+    if (!el)
+        return;
+    
+    tctx = el->timer_actions;
     cio_free_pollset(el->pollset);
     cio_free_hash_set(el->fd_set);
     close(el->event_pipe[0]);
     close(el->event_pipe[1]);
     pthread_mutex_destroy(&el->mutex);
+    
     while (tctx) {
         tmp_tctx = tctx;
         tctx = tctx->next;
