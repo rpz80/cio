@@ -77,6 +77,7 @@ void free_completion_ctx(void *ctx)
     struct completion_ctx *completion_ctx = ctx;
     pthread_cond_destroy(&completion_ctx->cond);
     pthread_mutex_destroy(&completion_ctx->mutex);
+    free(completion_ctx);
 }
 
 int completion_ctx_post_and_wait(void *ctx, void *event_loop, void (*posted_cb)(void *))

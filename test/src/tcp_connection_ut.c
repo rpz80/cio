@@ -29,6 +29,7 @@ struct test_server_ctx {
 static void free_server_ctx(struct test_server_ctx *server_ctx)
 {
     if (server_ctx) {
+        cio_free_tcp_connection_sync(server_ctx->connection);
         cio_free_tcp_acceptor_sync(server_ctx->acceptor);
         free(server_ctx);
     }
@@ -79,6 +80,8 @@ static void free_connection_tests_ctx(struct connection_tests_ctx *test_ctx)
         cio_event_loop_stop(test_ctx->event_loop);
         ASSERT_EQ_INT(0, pthread_join(test_ctx->event_loop_thread, &result));
         cio_free_event_loop(test_ctx->event_loop);
+        pthread_mutex_destroy(&test_ctx->mutex);
+        free(test_ctx);
     }
 }
 
@@ -146,9 +149,9 @@ static void on_accept(int fd, void *ctx, int ecode)
     struct connection_tests_ctx *tests_ctx = ctx;
     ASSERT_EQ_INT(ecode, CIO_NO_ERROR);
     ASSERT_NE_INT(fd, -1);
-    tests_ctx->connection = cio_new_tcp_connection_connected_fd(tests_ctx->event_loop, tests_ctx,
-                                                                fd);
-    ASSERT_NE_PTR(NULL, tests_ctx->connection);
+    tests_ctx->test_server_ctx->connection = cio_new_tcp_connection_connected_fd(
+        tests_ctx->event_loop, tests_ctx, fd);
+    ASSERT_NE_PTR(NULL, tests_ctx->test_server_ctx->connection);
     pthread_mutex_lock(&tests_ctx->mutex);
     tests_ctx->accepted = 1;
     pthread_mutex_unlock(&tests_ctx->mutex);
