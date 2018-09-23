@@ -1,10 +1,3 @@
-/**
- * cio_tcp_connection unit test suite. Test server is used to test connection. It is based on the
- * cio_tcp_acceptor and cio_tcp_connection. It echoes back what it receives from the client. Also
- * it may start sending messages right after the connection has been established to test full duplex
- * capabilities.
- */
-
 #include "tcp_connection_ut.h"
 #include <cio_tcp_connection.h>
 #include <cio_tcp_acceptor.h>
@@ -196,6 +189,16 @@ static void then_both_side_connections_are_successful(struct connection_tests_ct
     }
 }
 
+static void when_data_transfer_is_started(struct connection_tests_ctx *tests_ctx)
+{
+    
+}
+
+static void then_all_data_transferred_correctly(struct connection_tests_ctx *tests_ctx)
+{
+    
+}
+
 /**
  * Tests.
  */
@@ -212,4 +215,17 @@ void test_tcp_connection_connect_correct_address(void **ctx)
     when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
     when_connection_attempt_is_made(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
     then_both_side_connections_are_successful(test_ctx);
+}
+
+void test_tcp_connection_read_write_duplex_success(void **ctx)
+{
+    struct connection_tests_ctx* test_ctx = *ctx;
+    
+    when_duplex_mode_is(test_ctx, 1);
+    when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
+    when_connection_attempt_is_made(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
+    then_both_side_connections_are_successful(test_ctx);
+    
+    when_data_transfer_is_started(test_ctx);
+    then_all_data_transferred_correctly(test_ctx);
 }
