@@ -1,5 +1,5 @@
 /**
- * cio_tcp_connection test suite. Test server is used to test connection. It is based on the
+ * cio_tcp_connection unit test suite. Test server is used to test connection. It is based on the
  * cio_tcp_acceptor and cio_tcp_connection. It echoes back what it receives from the client. Also
  * it may start sending messages right after the connection has been established to test full duplex
  * capabilities.
@@ -12,6 +12,9 @@
 #include <ct.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <errno.h>
+#include <unistd.h>
 
 /**
  * Test server code.
@@ -21,13 +24,12 @@ struct test_server_ctx {
     void *acceptor;
     char read_buf[BUFSIZ];
     char write_buf[BUFSIZ];
-    int duplex_mode_on;
 };
 
 static void free_server_ctx(struct test_server_ctx *server_ctx)
 {
     if (server_ctx) {
-        cio_free_tcp_acceptor(server_ctx->acceptor);
+        cio_free_tcp_acceptor_sync(server_ctx->acceptor);
         free(server_ctx);
     }
 }
@@ -57,6 +59,11 @@ struct connection_tests_ctx {
     void *connection;
     struct test_server_ctx *test_server_ctx;
     void *event_loop;
+    pthread_t event_loop_thread;
+    int accepted;
+    int connected;
+    int duplex_on;
+    pthread_mutex_t mutex;
 };
 
 static const char *const VALID_SERVER_ADDR = "0.0.0.0";
@@ -64,16 +71,26 @@ static const int VALID_SERVER_PORT = 23654;
 
 static void free_connection_tests_ctx(struct connection_tests_ctx *test_ctx)
 {
+    void *result;
+
     if (test_ctx) {
-        cio_free_tcp_connection(test_ctx->connection);
+        cio_free_tcp_connection_sync(test_ctx->connection);
         free_server_ctx(test_ctx->test_server_ctx);
+        cio_event_loop_stop(test_ctx->event_loop);
+        ASSERT_EQ_INT(0, pthread_join(test_ctx->event_loop_thread, &result));
         cio_free_event_loop(test_ctx->event_loop);
     }
+}
+
+static void *event_loop_run_func(void *ctx)
+{
+    return (void *) cio_event_loop_run(ctx);
 }
 
 static struct connection_tests_ctx *new_connection_tests_ctx()
 {
     struct connection_tests_ctx* test_ctx;
+    int ecode;
     
     test_ctx = malloc(sizeof(*test_ctx));
     if (!test_ctx)
@@ -86,8 +103,18 @@ static struct connection_tests_ctx *new_connection_tests_ctx()
     if (!(test_ctx->connection = cio_new_tcp_connection(test_ctx->event_loop, test_ctx)))
         goto fail;
     
-    test_ctx->test_server_ctx = malloc(
+    if (!(test_ctx->test_server_ctx = new_test_server_ctx(test_ctx->event_loop, test_ctx)))
+        goto fail;
 
+    test_ctx->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+    ecode = pthread_create(&test_ctx->event_loop_thread, NULL, event_loop_run_func,
+                           test_ctx->event_loop);
+    if (ecode) {
+        errno = ecode;
+        perror("pthread_create");
+        goto fail;
+    }
+    
     return test_ctx;
     
 fail:
@@ -95,6 +122,9 @@ fail:
     return NULL;
 }
 
+/**
+ * Setup() & Teardown(). Assertive, preconditional and conditional auxiliary functions.
+ */
 int setup_tcp_connnection_tests(void **ctx)
 {
     if (!(*ctx = new_connection_tests_ctx()))
@@ -105,34 +135,78 @@ int setup_tcp_connnection_tests(void **ctx)
 
 int teardown_tcp_connnection_tests(void **ctx)
 {
-    ASSERT_NE_PTR(NULL, ((struct connection_tests_ctx *)(*ctx))->connection);
+    struct connection_tests_ctx *test_ctx = *ctx;
+
+    free_connection_tests_ctx(test_ctx);
     return 0;
 }
-/**
- * Assertive, preconditional and conditional auxiliary functions.
- */
 
-static void given_echo_tcp_server_started(struct test_server_ctx *test_server_ctx)
+static void on_accept(int fd, void *ctx, int ecode)
 {
-    
+    struct connection_tests_ctx *tests_ctx = ctx;
+    ASSERT_EQ_INT(ecode, CIO_NO_ERROR);
+    ASSERT_NE_INT(fd, -1);
+    tests_ctx->connection = cio_new_tcp_connection_connected_fd(tests_ctx->event_loop, tests_ctx,
+                                                                fd);
+    ASSERT_NE_PTR(NULL, tests_ctx->connection);
+    pthread_mutex_lock(&tests_ctx->mutex);
+    tests_ctx->accepted = 1;
+    pthread_mutex_unlock(&tests_ctx->mutex);
 }
 
+static void on_connect(void *ctx, int ecode)
+{
+    struct connection_tests_ctx *tests_ctx = ctx;
+    ASSERT_EQ_INT(ecode, CIO_NO_ERROR);
+    pthread_mutex_lock(&tests_ctx->mutex);
+    tests_ctx->connected = 1;
+    pthread_mutex_unlock(&tests_ctx->mutex);
+}
+
+static void when_echo_tcp_server_started(struct connection_tests_ctx *tests_ctx, const char *addr,
+                                         int port)
+{
+    cio_tcp_acceptor_async_accept(tests_ctx->test_server_ctx->acceptor, addr, port, on_accept);
+}
+
+static void when_connection_attempt_is_made(struct connection_tests_ctx *tests_ctx,
+                                            const char *addr, int port)
+{
+    cio_tcp_connection_async_connect(tests_ctx->connection, addr, port, on_connect);
+}
+
+static void when_duplex_mode_is(struct connection_tests_ctx *tests_ctx, int on)
+{
+    tests_ctx->duplex_on = on;
+}
+
+static void then_both_side_connections_are_successful(struct connection_tests_ctx *tests_ctx)
+{
+    while (1) {
+        pthread_mutex_lock(&tests_ctx->mutex);
+        if (tests_ctx->accepted == 1 && tests_ctx->connected == 1) {
+            pthread_mutex_unlock(&tests_ctx->mutex);
+            break;
+        }
+        pthread_mutex_unlock(&tests_ctx->mutex);
+        usleep(5 * 1000);
+    }
+}
 
 /**
- * Tests themselves.
- */
-
-/**
- * Test that the connection object is at least can be created.
+ * Tests.
  */
 void test_new_tcp_connection(void **ctx)
 {
-    free_connection_tests_ctx(*ctx);
+    ASSERT_NE_PTR(NULL, ((struct connection_tests_ctx *)(*ctx))->connection);
 }
 
 void test_tcp_connection_connect_correct_address(void **ctx)
 {
     struct connection_tests_ctx* test_ctx = *ctx;
     
-    given_echo_tcp_server_started();
+    when_duplex_mode_is(test_ctx, 1);
+    when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
+    when_connection_attempt_is_made(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
+    then_both_side_connections_are_successful(test_ctx);
 }

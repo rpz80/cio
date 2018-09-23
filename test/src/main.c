@@ -33,7 +33,8 @@ int main(int argc, char *argv[])
     };
     
     struct ct_ut tcp_connection_tests[] = {
-        TEST(test_new_tcp_connection)
+        TEST(test_new_tcp_connection),
+        TEST(test_tcp_connection_connect_correct_address)
     };
 
     result = RUN_TESTS(pollset_tests, setup_pollset_tests, teardown_pollset_tests);

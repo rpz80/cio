@@ -56,7 +56,7 @@ void add_connection(struct connection_ctx *connection)
 
 void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
 {
-    cio_free_tcp_connection(ctx->connection);
+    cio_free_tcp_connection_async(ctx->connection);
     ctx->connection = NULL;
 
     pthread_mutex_lock(&mutex);
@@ -69,7 +69,7 @@ void free_connection_ctx(struct connection_ctx *ctx)
 {
     if (ctx) {
         if (ctx->connection) {
-            cio_free_tcp_connection(ctx->connection);
+            cio_free_tcp_connection_async(ctx->connection);
             close(ctx->fd);
         }
         free(ctx);

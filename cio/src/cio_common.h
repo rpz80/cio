@@ -2,6 +2,7 @@
 #define CIO_COMMON_H
 
 #include <sys/time.h>
+#include <pthread.h>
 
 #define CIO_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define CIO_MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -36,4 +37,28 @@ typedef void (*pollset_cb_t)(void *ctx, int fd, int flags);
 long long time_ms(struct timeval *tv);
 
 int toggle_fd_nonblocking(int fd, int on);
-#endif
+
+/**
+ * Used to determine in runtime object passed in the posted callback type.
+ */
+enum obj_type {
+    ACCEPTOR,
+    CONNECTION,
+    COMPLETION
+};
+
+/**
+ * Used to enable waiting for the 'free' operation (connection, acceptor) to complete.
+ */
+struct completion_ctx {
+    enum obj_type type;
+    void *wrapped_ctx;
+    pthread_cond_t cond;
+    pthread_mutex_t mutex;
+};
+
+void *new_completion_ctx(void *wrapped_ctx);
+void free_completion_ctx(void *ctx);
+int completion_ctx_post_and_wait(void *ctx, void *event_loop, void (*posted_cb)(void *));
+
+#endif /* CIO_COMMON_H */

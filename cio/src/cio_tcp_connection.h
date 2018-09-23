@@ -1,3 +1,10 @@
+/**
+ * Tcp connection abstraction. All operations are run on the provided event loop thread to make it
+ * possible not to explicitely synchronize data access in the callbacks. Note that the event loop
+ * object MUST outlive the connection object because even the destruction of the connection is made
+ * on the event loop thread.
+ */
+
 #if !defined(CIO_TCP_CONNECTION_H)
 #define CIO_TCP_CONNECTION_H
 
@@ -11,7 +18,17 @@ void *cio_new_tcp_connection(void *event_loop, void *ctx);
  */
 void *cio_new_tcp_connection_connected_fd(void *event_loop, void *ctx, int fd);
 
-void cio_free_tcp_connection(void *tcp_connection);
+/**
+ * Asynchronous destruction. For use from within the event loop thread or when you dont't need to
+ * wait for the connection to destroy.
+ */
+void cio_free_tcp_connection_async(void *tcp_connection);
+
+/**
+ * Synchronous destruction. For use NOT from the event loop thread. Blocks until connection is
+ * destroyed.
+ */
+void cio_free_tcp_connection_sync(void *tcp_connection);
 
 void cio_tcp_connection_async_connect(void *tcp_connection, const char *addr, int port,
     void (*on_connect)(void *ctx, int ecode));

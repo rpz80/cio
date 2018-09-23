@@ -59,7 +59,7 @@ static void user_fd_cb_ctx_release(void *elem)
 
 void *cio_new_event_loop(int expected_capacity)
 {
-    struct event_loop *el = malloc(sizeof(struct event_loop));;
+    struct event_loop *el = malloc(sizeof(struct event_loop));
     int ecode = 0;
 
     el->pollset = cio_new_pollset();

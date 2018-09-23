@@ -1,8 +1,10 @@
 #include "cio_common.h"
+#include "cio_event_loop.h"
 #include <assert.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stdlib.h>
 
 void cio_perror(enum CIO_ERROR error, const char *message)
 {
@@ -53,4 +55,45 @@ int toggle_fd_nonblocking(int fd, int on)
 fail:
     perror("toggle_fd_blocking");
     return errno;
+}
+
+void *new_completion_ctx(void *wrapped_ctx)
+{
+    struct completion_ctx * completion_ctx;
+    
+    if (!(completion_ctx = malloc(sizeof(*completion_ctx))))
+        return NULL;
+    
+    completion_ctx->type = COMPLETION;
+    completion_ctx->wrapped_ctx = wrapped_ctx;
+    completion_ctx->cond = (pthread_cond_t) PTHREAD_COND_INITIALIZER;
+    completion_ctx->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+    
+    return completion_ctx;
+}
+
+void free_completion_ctx(void *ctx)
+{
+    struct completion_ctx *completion_ctx = ctx;
+    pthread_cond_destroy(&completion_ctx->cond);
+    pthread_mutex_destroy(&completion_ctx->mutex);
+}
+
+int completion_ctx_post_and_wait(void *ctx, void *event_loop, void (*posted_cb)(void *))
+{
+    struct completion_ctx *completion_ctx = ctx;
+    int ecode;
+    
+    if ((ecode = pthread_mutex_lock(&completion_ctx->mutex)))
+        return ecode;
+    
+    cio_event_loop_post(event_loop, 0, completion_ctx, posted_cb);
+    
+    if ((ecode = pthread_cond_wait(&completion_ctx->cond, &completion_ctx->mutex)))
+        return ecode;
+    
+    if ((ecode = pthread_mutex_unlock(&completion_ctx->mutex)))
+        return ecode;
+    
+    return 0;
 }

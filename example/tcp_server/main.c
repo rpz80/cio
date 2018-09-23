@@ -36,7 +36,7 @@ static void free_connection_ctx(struct connection_ctx *ctx)
 {
     if (ctx) {
         if (ctx->connection)
-            cio_free_tcp_connection(ctx->connection);
+            cio_free_tcp_connection_async(ctx->connection);
             close(ctx->fd);
         free(ctx);
     }

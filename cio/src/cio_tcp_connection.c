@@ -34,12 +34,12 @@ struct wrapper_ctx {
 
 /**
  * Create new wrapper_ctx and add it to the list of the existing ones.
- * ctx - 'real' context, for example associated with the read or write operation.
- * on_destroy - function to be called when connection object is being destroyed. In this function
- * 'real' context should be informed about connection destruction. This is basically done by setting
- * CONNECTION ptr to the NULL. This ptr should be checked in the corresponding callbacks and these
- * callbacks should exit immediately in the case if it's NULL, since the object has already been
- * destroyed.
+ * ctx - the 'real' context, for example associated with the read or write operation.
+ * on_destroy - the function to be called when the connection object is being destroyed. In this
+ * function real' context should be informed about connection destruction. This is basically done by
+ * setting CONNECTION ptr to the NULL. This ptr should be checked in the corresponding callbacks and
+ * these callbacks should exit immediately in the case if it's NULL, since the object has already
+ * been destroyed.
  */
 static void *new_wrapper_ctx(struct wrapper_ctx **root, void *ctx, void (*on_destroy)(void *ctx))
 {
@@ -85,6 +85,7 @@ static void free_all_wrappers(struct wrapper_ctx *root_wrapper_ctx)
 }
 
 struct tcp_connection_ctx {
+    enum obj_type type;
     void *event_loop;
     void *user_ctx;
     void *write_ctx;
@@ -102,6 +103,7 @@ static void *new_tcp_connection_impl(void *event_loop, void *ctx, int fd)
     if (!tctx)
         goto fail;
 
+    tctx->type = CONNECTION;
     tctx->event_loop = event_loop;
     tctx->user_ctx = ctx;
     tctx->wrapper_ctx = NULL;
@@ -132,20 +134,73 @@ void *cio_new_tcp_connection_connected_fd(void *event_loop, void *ctx, int fd)
     return new_tcp_connection_impl(event_loop, ctx, fd);
 }
 
+/**
+ * Destroy tcp connection from within event loop thread. Two types of objects might be passed here:
+ * 'tcp_connection_ctx' or 'comletion_ctx'.
+ */
 static void free_tcp_connection_impl(void *ctx)
 {
-    struct tcp_connection_ctx *tcp_connection_ctx = ctx;
-
-    close(tcp_connection_ctx->fd);
-    cio_event_loop_remove_fd(tcp_connection_ctx->event_loop, tcp_connection_ctx->fd);
-    free_all_wrappers(tcp_connection_ctx->wrapper_ctx);
-    free(tcp_connection_ctx);
+    struct tcp_connection_ctx *connection_ctx;
+    struct completion_ctx *completion_ctx = NULL;
+    enum obj_type type;
+    
+    type = *((enum obj_type *) ctx);
+    switch (type) {
+        case CONNECTION:
+            connection_ctx = ctx;
+            break;
+        case COMPLETION:
+            completion_ctx = ctx;
+            connection_ctx = completion_ctx->wrapped_ctx;
+            break;
+        default:
+            assert(0);
+    }
+    
+    cio_event_loop_remove_fd(connection_ctx->event_loop, connection_ctx->fd);
+    close(connection_ctx->fd);
+    free_all_wrappers(connection_ctx->wrapper_ctx);
+    free(connection_ctx);
+    
+    pthread_mutex_lock(&completion_ctx->mutex);
+    if (type == COMPLETION)
+        pthread_cond_signal(&completion_ctx->cond);
+    pthread_mutex_unlock(&completion_ctx->mutex);
 }
 
-void cio_free_tcp_connection(void *tcp_connection)
+void cio_free_tcp_connection_async(void *tcp_connection)
 {
-    struct tcp_connection_ctx *tctx = tcp_connection;
-    cio_event_loop_post(tctx->event_loop, 0, tctx, free_tcp_connection_impl);
+    struct tcp_connection_ctx *connection_ctx = tcp_connection;
+    if (!connection_ctx)
+        return;
+    cio_event_loop_post(connection_ctx->event_loop, 0, connection_ctx, free_tcp_connection_impl);
+}
+
+void cio_free_tcp_connection_sync(void *tcp_connection)
+{
+    struct tcp_connection_ctx *connection_ctx = tcp_connection;
+    struct completion_ctx *completion_ctx;
+    int ecode;
+    
+    if (!connection_ctx)
+        return;
+
+    if (!(completion_ctx = new_completion_ctx(connection_ctx)))
+        goto fail;
+
+    if ((ecode = completion_ctx_post_and_wait(completion_ctx, connection_ctx->event_loop,
+                                              free_tcp_connection_impl))) {
+        errno = ecode;
+        goto fail;
+    }
+    
+    goto finally;
+
+fail:
+    perror("cio_free_tcp_connection_sync");
+    
+finally:
+    free_completion_ctx(completion_ctx);
 }
 
 static void tcp_connection_remove_wrapper_by_posted_ctx(

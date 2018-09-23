@@ -30,18 +30,75 @@ void *cio_new_tcp_acceptor(void *event_loop, void *user_ctx)
     memset(sctx, 0, sizeof(*sctx));
     sctx->event_loop = event_loop;
     sctx->user_ctx = user_ctx;
+    sctx->fd = -1;
 
     return sctx;
 }
 
-void cio_free_tcp_acceptor(void *tcp_server)
+static void free_tcp_acceptor_impl(void *ctx)
 {
-    struct tcp_acceptor_ctx *sctx = tcp_server;
+    struct tcp_acceptor_ctx *acceptor_ctx;
+    struct completion_ctx *completion_ctx = NULL;
+    enum obj_type type;
+    
+    type = *((enum obj_type *) ctx);
+    switch (type) {
+        case ACCEPTOR:
+            acceptor_ctx = ctx;
+            break;
+        case COMPLETION:
+            completion_ctx = ctx;
+            acceptor_ctx = completion_ctx->wrapped_ctx;
+            break;
+        default:
+            assert(0);
+    }
+    
+    cio_event_loop_remove_fd(acceptor_ctx->event_loop, acceptor_ctx->fd);
+    close(acceptor_ctx->fd);
+    free(acceptor_ctx);
+ 
+    pthread_mutex_lock(&completion_ctx->mutex);
+    if (type == COMPLETION)
+        pthread_cond_signal(&completion_ctx->cond);
+    pthread_mutex_unlock(&completion_ctx->mutex);
+}
 
-    if (!tcp_server)
-        return;    
-    cio_event_loop_remove_fd(sctx->event_loop, sctx->fd);
-    free(tcp_server);
+void cio_free_tcp_acceptor_async(void *tcp_acceptor)
+{
+    struct tcp_acceptor_ctx *acceptor_ctx = tcp_acceptor;
+
+    if (!acceptor_ctx)
+        return;
+    
+    cio_event_loop_post(acceptor_ctx->event_loop, 0, acceptor_ctx, free_tcp_acceptor_impl);
+}
+
+void cio_free_tcp_acceptor_sync(void *tcp_acceptor)
+{
+    struct tcp_acceptor_ctx *acceptor_ctx = tcp_acceptor;
+    struct completion_ctx *completion_ctx;
+    int ecode;
+    
+    if (!acceptor_ctx)
+        return;
+    
+    if (!(completion_ctx = new_completion_ctx(acceptor_ctx)))
+        goto fail;
+    
+    if ((ecode = completion_ctx_post_and_wait(completion_ctx, acceptor_ctx->event_loop,
+                                              free_tcp_acceptor_impl))) {
+        errno = ecode;
+        goto fail;
+    }
+    
+    goto finally;
+    
+fail:
+    perror("cio_free_tcp_acceptor_sync");
+    
+finally:
+    free_completion_ctx(completion_ctx);
 }
 
 static void on_accept_impl(void *ctx, int fd, int flags)
@@ -76,23 +133,27 @@ void cio_tcp_acceptor_async_accept(void *tcp_server, const char *addr, int port,
 
     while (cio_resolver_next_endpoint(resolver, &ainfo) == CIO_NO_ERROR) {
         if ((sctx->fd = socket(ainfo.ai_family, SOCK_STREAM, 0)) == -1) {
-            perror("cio_tcp_server_async_accept: socket()");
+            perror("cio_acceptor_async_accept: socket()");
             continue;
         } else {
+            if (setsockopt(sctx->fd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int))) {
+                perror("cio_acceptor_async_accept: setsockopt");
+                goto fail;
+            }
             if (bind(sctx->fd, ainfo.ai_addr, sizeof(*ainfo.ai_addr))) {
-                perror("cio_tcp_server_async_accept: bind");
+                perror("cio_acceptor_async_accept: bind");
                 goto fail;
             }
             if (listen(sctx->fd, 128)) {
-                perror("cio_tcp_server_async_accept: listen");
+                perror("cio_acceptor_async_accept: listen");
                 goto fail;
             }
             if (toggle_fd_nonblocking(sctx->fd, 1)) {
-                perror("cio_tcp_server_async_accept: toggle non-blocking");
+                perror("cio_acceptor_async_accept: toggle non-blocking");
                 goto fail;
             }
             if ((ecode = cio_event_loop_add_fd(sctx->event_loop, sctx->fd, CIO_FLAG_IN, sctx, on_accept_impl))) {
-                cio_perror(ecode, "cio_tcp_server_async_accept: cio_event_loop_add_fd");
+                cio_perror(ecode, "cio_acceptor_async_accept: cio_event_loop_add_fd");
                 goto fail;
             }
             cio_free_resolver(resolver);
