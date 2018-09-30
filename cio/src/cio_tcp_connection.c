@@ -109,7 +109,7 @@ void *cio_new_tcp_connection_connected_fd(void *event_loop, void *ctx, int fd)
 static void free_tcp_connection_impl(void *ctx)
 {
     struct free_connection_ctx *free_connection_ctx = ctx;
-    struct tcp_connection_ctx* connection_ctx;
+    struct tcp_connection_ctx* connection_ctx = NULL;
     struct completion_ctx *completion_ctx = NULL;
     enum obj_type type;
     
@@ -124,6 +124,7 @@ static void free_tcp_connection_impl(void *ctx)
             break;
         default:
             assert(0);
+            return;
     }
     
     if (free_connection_ctx->do_destroy) {

@@ -37,7 +37,7 @@ void *cio_new_tcp_acceptor(void *event_loop, void *user_ctx)
 
 static void free_tcp_acceptor_impl(void *ctx)
 {
-    struct tcp_acceptor_ctx *acceptor_ctx;
+    struct tcp_acceptor_ctx *acceptor_ctx = NULL;
     struct completion_ctx *completion_ctx = NULL;
     enum obj_type type;
     
@@ -52,6 +52,7 @@ static void free_tcp_acceptor_impl(void *ctx)
             break;
         default:
             assert(0);
+            return;
     }
     
     cio_event_loop_remove_fd(acceptor_ctx->event_loop, acceptor_ctx->fd);
