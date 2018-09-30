@@ -81,21 +81,34 @@ void free_completion_ctx(void *ctx)
     free(completion_ctx);
 }
 
-int completion_ctx_post_and_wait(void *ctx, void *event_loop, void (*posted_cb)(void *))
+int completion_ctx_post_and_wait(struct completion_ctx *completion_ctx, void *event_loop,
+                                 void (*posted_cb)(void *), int wrap_in_free_ctx)
 {
-    struct completion_ctx *completion_ctx = ctx;
-    int ecode;
+    struct free_connection_ctx *free_connection_ctx;
+    int ecode = 0;
+    
+    if (wrap_in_free_ctx) {
+        if (!(free_connection_ctx = malloc(sizeof(*free_connection_ctx))))
+            return errno;
+        
+        free_connection_ctx->do_destroy = 1;
+        free_connection_ctx->wrapped_ctx = completion_ctx;
+    }
     
     if ((ecode = pthread_mutex_lock(&completion_ctx->mutex)))
-        return ecode;
+        goto end;
     
-    cio_event_loop_post(event_loop, 0, completion_ctx, posted_cb);
+    if (wrap_in_free_ctx)
+        cio_event_loop_post(event_loop, 0, free_connection_ctx, posted_cb);
+    else
+        cio_event_loop_post(event_loop, 0, completion_ctx, posted_cb);
     
     if ((ecode = pthread_cond_wait(&completion_ctx->cond, &completion_ctx->mutex)))
-        return ecode;
+        goto end;
     
     if ((ecode = pthread_mutex_unlock(&completion_ctx->mutex)))
-        return ecode;
-    
-    return 0;
+        goto end;
+
+end:
+    return ecode;
 }

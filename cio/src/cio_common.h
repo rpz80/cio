@@ -58,8 +58,14 @@ struct completion_ctx {
     pthread_mutex_t mutex;
 };
 
+struct free_connection_ctx {
+    void *wrapped_ctx;
+    int do_destroy;
+};
+
 void *new_completion_ctx(void *wrapped_ctx);
 void free_completion_ctx(void *ctx);
-int completion_ctx_post_and_wait(void *ctx, void *event_loop, void (*posted_cb)(void *));
+int completion_ctx_post_and_wait(struct completion_ctx *completion_ctx, void *event_loop,
+                                 void (*posted_cb)(void *), int wrap_in_free_ctx);
 
 #endif /* CIO_COMMON_H */

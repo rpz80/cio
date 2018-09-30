@@ -106,64 +106,60 @@ void *cio_new_tcp_connection_connected_fd(void *event_loop, void *ctx, int fd)
     return new_tcp_connection_impl(event_loop, ctx, fd);
 }
 
-/**
- * Destroy tcp connection from within event loop thread. Two types of objects might be passed here:
- * 'tcp_connection_ctx' or 'comletion_ctx'.
- */
 static void free_tcp_connection_impl(void *ctx)
 {
-    struct tcp_connection_ctx *connection_ctx;
+    struct free_connection_ctx *free_connection_ctx = ctx;
+    struct tcp_connection_ctx* connection_ctx;
     struct completion_ctx *completion_ctx = NULL;
     enum obj_type type;
     
-    type = *((enum obj_type *) ctx);
+    type = *((enum obj_type *) (free_connection_ctx->wrapped_ctx));
     switch (type) {
         case CONNECTION:
-            connection_ctx = ctx;
+            connection_ctx = free_connection_ctx->wrapped_ctx;
             break;
         case COMPLETION:
-            completion_ctx = ctx;
+            completion_ctx = free_connection_ctx->wrapped_ctx;
             connection_ctx = completion_ctx->wrapped_ctx;
             break;
         default:
             assert(0);
     }
     
-    if (connection_ctx->cstate == CIO_CS_DESTROYED) {
-        assert(type == CONNECTION);
-        
-        if (connection_ctx->reference_count == 1)
-            free(connection_ctx);
-        else
-            --connection_ctx->reference_count;
-        
-        return;
+    if (free_connection_ctx->do_destroy) {
+        cio_event_loop_remove_fd(connection_ctx->event_loop, connection_ctx->fd);
+        close(connection_ctx->fd);
     }
-    
-    cio_event_loop_remove_fd(connection_ctx->event_loop, connection_ctx->fd);
-    close(connection_ctx->fd);
-    
-    if (connection_ctx->reference_count == 1) {
+
+    if (--connection_ctx->reference_count == 0)
         free(connection_ctx);
-    }
-    else {
-        connection_ctx->reference_count--;
-        connection_ctx->cstate = CIO_CS_DESTROYED;
-    }
     
     if (type == COMPLETION) {
         pthread_mutex_lock(&completion_ctx->mutex);
         pthread_cond_signal(&completion_ctx->cond);
         pthread_mutex_unlock(&completion_ctx->mutex);
     }
+    
+    free(free_connection_ctx);
 }
 
 void cio_free_tcp_connection_async(void *tcp_connection)
 {
     struct tcp_connection_ctx *connection_ctx = tcp_connection;
+    struct free_connection_ctx *free_connection_ctx;
+    
     if (!connection_ctx)
         return;
-    cio_event_loop_post(connection_ctx->event_loop, 0, connection_ctx, free_tcp_connection_impl);
+    
+    if (!(free_connection_ctx = malloc(sizeof(*free_connection_ctx)))) {
+        perror("cio_free_tcp_connection_async");
+        return;
+    }
+    
+    free_connection_ctx->do_destroy = 1;
+    free_connection_ctx->wrapped_ctx = connection_ctx;
+    cio_event_loop_post(connection_ctx->event_loop, 0, free_connection_ctx,
+                        free_tcp_connection_impl);
 }
 
 void cio_free_tcp_connection_sync(void *tcp_connection)
@@ -179,7 +175,7 @@ void cio_free_tcp_connection_sync(void *tcp_connection)
         goto fail;
 
     if ((ecode = completion_ctx_post_and_wait(completion_ctx, connection_ctx->event_loop,
-                                              free_tcp_connection_impl))) {
+                                              free_tcp_connection_impl, 1))) {
         errno = ecode;
         goto fail;
     }
@@ -202,13 +198,19 @@ static void do_read(struct read_ctx *read_ctx);
 static void connect_ctx_cleanup(struct connect_ctx *connect_ctx, int cio_error)
 {
     struct tcp_connection_ctx *tcp_connection_ctx = connect_ctx->tcp_connection;
+    struct free_connection_ctx *free_connection_ctx;
 
     if (cio_error == CIO_NO_ERROR)
         tcp_connection_ctx->cstate = CIO_CS_CONNECTED;
     else if (cio_error != CIO_ALREADY_DESTROYED_ERROR)
         tcp_connection_ctx->cstate = CIO_CS_ERROR;
 
-    free_tcp_connection_impl(tcp_connection_ctx);
+    free_connection_ctx = malloc(sizeof(*free_connection_ctx));
+    assert(free_connection_ctx);
+    free_connection_ctx->do_destroy = 0;
+    free_connection_ctx->wrapped_ctx = tcp_connection_ctx;
+    free_tcp_connection_impl(free_connection_ctx);
+    
     connect_ctx->on_connect(tcp_connection_ctx->user_ctx, cio_error);
     free_connect_ctx(connect_ctx);
     tcp_connection_ctx->connect_ctx = NULL;
@@ -217,11 +219,17 @@ static void connect_ctx_cleanup(struct connect_ctx *connect_ctx, int cio_error)
 static void write_ctx_cleanup(struct write_ctx *write_ctx, int cio_error)
 {
     struct tcp_connection_ctx *tcp_connection_ctx = write_ctx->tcp_connection;
+    struct free_connection_ctx *free_connection_ctx;
     
-    if (cio_error != CIO_ALREADY_DESTROYED_ERROR)
+    if (cio_error != CIO_ALREADY_DESTROYED_ERROR && cio_error != CIO_NO_ERROR)
         tcp_connection_ctx->cstate = CIO_CS_ERROR;
     
-    free_tcp_connection_impl(tcp_connection_ctx);
+    free_connection_ctx = malloc(sizeof(*free_connection_ctx));
+    assert(free_connection_ctx);
+    free_connection_ctx->do_destroy = 0;
+    free_connection_ctx->wrapped_ctx = tcp_connection_ctx;
+    free_tcp_connection_impl(free_connection_ctx);
+    
     write_ctx->on_write(tcp_connection_ctx->user_ctx, cio_error);
     free(write_ctx);
     tcp_connection_ctx->write_ctx = NULL;
@@ -230,11 +238,17 @@ static void write_ctx_cleanup(struct write_ctx *write_ctx, int cio_error)
 static void read_ctx_cleanup(struct read_ctx *read_ctx, int cio_error)
 {
     struct tcp_connection_ctx *tcp_connection_ctx = read_ctx->tcp_connection;
+    struct free_connection_ctx *free_connection_ctx;
     
-    if (cio_error != CIO_ALREADY_DESTROYED_ERROR)
+    if (cio_error != CIO_ALREADY_DESTROYED_ERROR && cio_error != CIO_NO_ERROR)
         tcp_connection_ctx->cstate = CIO_CS_ERROR;
-    
-    free_tcp_connection_impl(tcp_connection_ctx);
+  
+    free_connection_ctx = malloc(sizeof(*free_connection_ctx));
+    assert(free_connection_ctx);
+    free_connection_ctx->do_destroy = 0;
+    free_connection_ctx->wrapped_ctx = tcp_connection_ctx;
+    free_tcp_connection_impl(free_connection_ctx);
+
     read_ctx->on_read(tcp_connection_ctx->user_ctx, cio_error, read_ctx->read);
     free(read_ctx);
     tcp_connection_ctx->read_ctx = NULL;
@@ -475,6 +489,7 @@ static void async_write_impl(void *ctx)
     struct tcp_connection_ctx *tcp_connection_ctx = write_ctx->tcp_connection;
 
     assert(tcp_connection_ctx);
+    tcp_connection_ctx->reference_count++;
     switch (tcp_connection_ctx->cstate) {
         case CIO_CS_DESTROYED:
             return write_ctx_cleanup(write_ctx, CIO_ALREADY_DESTROYED_ERROR);
@@ -535,6 +550,7 @@ static void do_read(struct read_ctx *read_ctx)
     if (read_ctx->read >= 0) {
         return read_ctx_cleanup(read_ctx, CIO_NO_ERROR);
     } else {
+        read_ctx->read = 0;
         system_ecode = errno;
         if (system_ecode == EWOULDBLOCK)
             return;
@@ -554,6 +570,7 @@ static void async_read_impl(void *ctx)
     struct tcp_connection_ctx *tcp_connection_ctx = read_ctx->tcp_connection;
     
     assert(tcp_connection_ctx);
+    tcp_connection_ctx->reference_count++;
     switch (tcp_connection_ctx->cstate) {
         case CIO_CS_DESTROYED:
             return read_ctx_cleanup(read_ctx, CIO_ALREADY_DESTROYED_ERROR);

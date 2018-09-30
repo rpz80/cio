@@ -349,7 +349,7 @@ static void on_read(void *ctx, int ecode, int bytes_read)
     ASSERT_EQ_INT(0, pthread_mutex_unlock(&test_client->mutex));
     
     if (test_client->total_read_buf->size == tests->test_data_size) {
-        ASSERT_EQ_INT(0, memcmp(test_client->total_read_buf, tests->test_data,
+        ASSERT_EQ_INT(0, memcmp(test_client->total_read_buf->data, tests->test_data,
                                 tests->test_data_size));
         return;
     }
@@ -367,13 +367,13 @@ static void when_data_transfer_is_started(struct connection_tests *tests_ctx)
                                    tests_ctx->test_data + tests_ctx->test_client->written,
                                    BUFSIZ, on_write);
     
-//    cio_tcp_connection_async_read(tests_ctx->test_client->connection,
-//                                  tests_ctx->test_client->read_buf,
-//                                  sizeof(tests_ctx->test_client->read_buf), on_read);
+    cio_tcp_connection_async_read(tests_ctx->test_client->connection,
+                                  tests_ctx->test_client->read_buf,
+                                  sizeof(tests_ctx->test_client->read_buf), on_read);
     
-//    cio_tcp_connection_async_write(tests_ctx->test_server->server_client->connection,
-//                                   tests_ctx->test_data + tests_ctx->test_server->server_client->written,
-//                                   BUFSIZ, on_write);
+    cio_tcp_connection_async_write(tests_ctx->test_server->server_client->connection,
+                                   tests_ctx->test_data + tests_ctx->test_server->server_client->written,
+                                   BUFSIZ, on_write);
     
     cio_tcp_connection_async_read(tests_ctx->test_server->server_client->connection,
                                   tests_ctx->test_server->server_client->read_buf,

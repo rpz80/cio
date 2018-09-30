@@ -87,7 +87,7 @@ void cio_free_tcp_acceptor_sync(void *tcp_acceptor)
         goto fail;
     
     if ((ecode = completion_ctx_post_and_wait(completion_ctx, acceptor_ctx->event_loop,
-                                              free_tcp_acceptor_impl))) {
+                                              free_tcp_acceptor_impl, 0))) {
         errno = ecode;
         goto fail;
     }
