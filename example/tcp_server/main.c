@@ -1,7 +1,7 @@
 #include "../common.h"
 #include <cio_tcp_connection.h>
 #include <cio_event_loop.h>
-#include <cio_tcp_server.h>
+#include <cio_tcp_acceptor.h>
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
@@ -262,14 +262,14 @@ int main(int argc, char *const argv[])
 
     if (parse_addr_string(addr_buf_option, host_addr, BUFSIZ, &port)) {
         printf("Invalid address: %s\n", addr_buf_option);
-        cio_free_tcp_acceptor(tcp_server);
+        cio_free_tcp_acceptor_sync(tcp_server);
         cio_free_event_loop(event_loop);
         return EXIT_FAILURE;
     }
 
     cio_tcp_acceptor_async_accept(tcp_server, host_addr, port, on_accept);
     pthread_join(event_loop_thread, &thread_result);
-    cio_free_tcp_acceptor(tcp_server);
+    cio_free_tcp_acceptor_sync(tcp_server);
     cio_free_event_loop(event_loop);
 
     return EXIT_SUCCESS;
