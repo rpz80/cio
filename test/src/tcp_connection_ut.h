@@ -8,6 +8,8 @@
  *   - connect correct address ipv4 && ipv6
  *   - connect invalid address
  *   - connect timeout
+ *   - close connection on_write
+ *   - close connection on_read
  *   - read/write duplex success
  *   - read/write duplex success multiple connections
  *   - read/write sequence success

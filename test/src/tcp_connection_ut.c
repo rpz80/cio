@@ -63,11 +63,12 @@ int growable_buffer_append(struct growable_buffer *growable_buffer, const void *
 
 struct test_client {
     void *connection;
-    struct connection_tests_ctx *test_ctx;
+    struct connection_tests *tests_fixture;
     int connected;
     int written;
     char read_buf[1024];
     struct growable_buffer *total_read_buf;
+    pthread_mutex_t mutex;
 };
 
 static void free_test_client(struct test_client *test_client)
@@ -80,7 +81,7 @@ static void free_test_client(struct test_client *test_client)
 }
 
 static struct test_client *new_test_client(void *event_loop,
-                                               struct connection_tests_ctx *test_ctx,
+                                               struct connection_tests *tests_fixture,
                                                int create_connection)
 {
     struct test_client *test_client;
@@ -90,7 +91,8 @@ static struct test_client *new_test_client(void *event_loop,
         goto fail;
     
     memset(test_client, 0, sizeof(*test_client));
-    test_client->test_ctx = test_ctx;
+    test_client->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+    test_client->tests_fixture = tests_fixture;
     if (create_connection
         && !(test_client->connection = cio_new_tcp_connection(event_loop, test_client)))
         goto fail;
@@ -120,33 +122,34 @@ static void free_server_ctx(struct test_server *server_ctx)
     }
 }
 
-static struct test_server *new_test_server_ctx(void *event_loop, void *user_ctx)
+static struct test_server *new_test_server(void *event_loop,
+                                               struct connection_tests* tests_fixture)
 {
-    struct test_server *server_ctx;
+    struct test_server *test_server;
     
-    if (!(server_ctx = malloc(sizeof(*server_ctx))))
+    if (!(test_server = malloc(sizeof(*test_server))))
         goto fail;
     
-    memset(server_ctx, 0, sizeof(*server_ctx));
-    if (!(server_ctx->acceptor = cio_new_tcp_acceptor(event_loop, user_ctx)))
+    memset(test_server, 0, sizeof(*test_server));
+    if (!(test_server->acceptor = cio_new_tcp_acceptor(event_loop, tests_fixture)))
         goto fail;
     
-    if (!(server_ctx->server_client = new_test_client(event_loop, server_ctx->server_client, 0)))
+    if (!(test_server->server_client = new_test_client(event_loop, tests_fixture, 0)))
         goto fail;
 
-    return server_ctx;
+    return test_server;
     
 fail:
-    free_server_ctx(server_ctx);
+    free_server_ctx(test_server);
     return NULL;
 }
 
 /**
  * Tests context.
  */
-struct connection_tests_ctx {
-    struct test_server *test_server_ctx;
-    struct test_client *test_client_ctx;
+struct connection_tests {
+    struct test_server *test_server;
+    struct test_client *test_client;
     void *event_loop;
     pthread_t event_loop_thread;
     pthread_mutex_t mutex;
@@ -158,13 +161,13 @@ struct connection_tests_ctx {
 static const char *const VALID_SERVER_ADDR = "0.0.0.0";
 static const int VALID_SERVER_PORT = 23654;
 
-static void free_connection_tests_ctx(struct connection_tests_ctx *test_ctx)
+static void free_connection_tests_ctx(struct connection_tests *test_ctx)
 {
     void *result;
 
     if (test_ctx) {
-        free_test_client(test_ctx->test_client_ctx);
-        free_server_ctx(test_ctx->test_server_ctx);
+        free_test_client(test_ctx->test_client);
+        free_server_ctx(test_ctx->test_server);
         cio_event_loop_stop(test_ctx->event_loop);
         ASSERT_EQ_INT(0, pthread_join(test_ctx->event_loop_thread, &result));
         cio_free_event_loop(test_ctx->event_loop);
@@ -194,43 +197,43 @@ static void *generate_test_data(int data_size)
     return data;
 }
 
-static struct connection_tests_ctx *new_connection_tests_ctx()
+static struct connection_tests *new_connection_tests_fixture()
 {
-    struct connection_tests_ctx* test_ctx;
+    struct connection_tests* tests_fixture;
     int ecode;
     
-    test_ctx = malloc(sizeof(*test_ctx));
-    if (!test_ctx)
+    tests_fixture = malloc(sizeof(*tests_fixture));
+    if (!tests_fixture)
         goto fail;
     
-    memset(test_ctx, 0, sizeof(*test_ctx));
-    if (!(test_ctx->event_loop = cio_new_event_loop(1024)))
+    memset(tests_fixture, 0, sizeof(*tests_fixture));
+    if (!(tests_fixture->event_loop = cio_new_event_loop(1024)))
         goto fail;
 
 
-    if (!(test_ctx->test_client_ctx = new_test_client(test_ctx->event_loop, test_ctx, 1)))
+    if (!(tests_fixture->test_client = new_test_client(tests_fixture->event_loop, tests_fixture, 1)))
         goto fail;
     
-    if (!(test_ctx->test_server_ctx = new_test_server_ctx(test_ctx->event_loop, test_ctx)))
+    if (!(tests_fixture->test_server = new_test_server(tests_fixture->event_loop, tests_fixture)))
         goto fail;
     
-    test_ctx->test_data_size = 1024 * 1024 * 10;
-    if (!(test_ctx->test_data = generate_test_data(test_ctx->test_data_size)))
+    tests_fixture->test_data_size = 1024 * 1024 * 10;
+    if (!(tests_fixture->test_data = generate_test_data(tests_fixture->test_data_size)))
         goto fail;
 
-    test_ctx->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
-    ecode = pthread_create(&test_ctx->event_loop_thread, NULL, event_loop_run_func,
-                           test_ctx->event_loop);
+    tests_fixture->mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+    ecode = pthread_create(&tests_fixture->event_loop_thread, NULL, event_loop_run_func,
+                           tests_fixture->event_loop);
     if (ecode) {
         errno = ecode;
         perror("pthread_create");
         goto fail;
     }
     
-    return test_ctx;
+    return tests_fixture;
     
 fail:
-    free_connection_tests_ctx(test_ctx);
+    free_connection_tests_ctx(tests_fixture);
     return NULL;
 }
 
@@ -239,7 +242,7 @@ fail:
  */
 int setup_tcp_connnection_tests(void **ctx)
 {
-    if (!(*ctx = new_connection_tests_ctx()))
+    if (!(*ctx = new_connection_tests_fixture()))
         return 1;
     
     return 0;
@@ -247,7 +250,7 @@ int setup_tcp_connnection_tests(void **ctx)
 
 int teardown_tcp_connnection_tests(void **ctx)
 {
-    struct connection_tests_ctx *test_ctx = *ctx;
+    struct connection_tests *test_ctx = *ctx;
 
     free_connection_tests_ctx(test_ctx);
     return 0;
@@ -255,48 +258,54 @@ int teardown_tcp_connnection_tests(void **ctx)
 
 static void on_accept(int fd, void *ctx, int ecode)
 {
-    struct connection_tests_ctx *tests_ctx = ctx;
+    struct connection_tests *tests_fixture = ctx;
+    
     ASSERT_EQ_INT(ecode, CIO_NO_ERROR);
     ASSERT_NE_INT(fd, -1);
-    tests_ctx->test_server_ctx->server_client->connection = cio_new_tcp_connection_connected_fd(
-        tests_ctx->event_loop, tests_ctx, fd);
-    ASSERT_NE_PTR(NULL, tests_ctx->test_server_ctx->server_client->connection);
-    pthread_mutex_lock(&tests_ctx->mutex);
-    tests_ctx->test_server_ctx->accepted = 1;
-    pthread_mutex_unlock(&tests_ctx->mutex);
+    
+    tests_fixture->test_server->server_client->connection = cio_new_tcp_connection_connected_fd(
+        tests_fixture->event_loop, tests_fixture->test_server->server_client, fd);
+    ASSERT_NE_PTR(NULL, tests_fixture->test_server->server_client->connection);
+    
+    pthread_mutex_lock(&tests_fixture->mutex);
+    tests_fixture->test_server->accepted = 1;
+    pthread_mutex_unlock(&tests_fixture->mutex);
 }
 
 static void on_connect(void *ctx, int ecode)
 {
-    struct connection_tests_ctx *tests_ctx = ctx;
+    struct test_client *test_client = ctx;
+    struct connection_tests *tests_fixture = test_client->tests_fixture;
+    
     ASSERT_EQ_INT(ecode, CIO_NO_ERROR);
-    pthread_mutex_lock(&tests_ctx->mutex);
-    tests_ctx->test_client_ctx->connected = 1;
-    pthread_mutex_unlock(&tests_ctx->mutex);
+    
+    pthread_mutex_lock(&tests_fixture->mutex);
+    test_client->connected = 1;
+    pthread_mutex_unlock(&tests_fixture->mutex);
 }
 
-static void when_echo_tcp_server_started(struct connection_tests_ctx *tests_ctx, const char *addr,
+static void when_echo_tcp_server_started(struct connection_tests *tests_ctx, const char *addr,
                                          int port)
 {
-    cio_tcp_acceptor_async_accept(tests_ctx->test_server_ctx->acceptor, addr, port, on_accept);
+    cio_tcp_acceptor_async_accept(tests_ctx->test_server->acceptor, addr, port, on_accept);
 }
 
-static void when_connection_attempt_is_made(struct connection_tests_ctx *tests_ctx,
+static void when_connection_attempt_is_made(struct connection_tests *tests_ctx,
                                             const char *addr, int port)
 {
-    cio_tcp_connection_async_connect(tests_ctx->test_client_ctx->connection, addr, port, on_connect);
+    cio_tcp_connection_async_connect(tests_ctx->test_client->connection, addr, port, on_connect);
 }
 
-static void when_duplex_mode_is(struct connection_tests_ctx *tests_ctx, int on)
+static void when_duplex_mode_is(struct connection_tests *tests_ctx, int on)
 {
     tests_ctx->duplex_on = on;
 }
 
-static void then_both_side_connections_are_successful(struct connection_tests_ctx *tests_ctx)
+static void then_both_side_connections_are_successful(struct connection_tests *tests_ctx)
 {
     while (1) {
         pthread_mutex_lock(&tests_ctx->mutex);
-        if (tests_ctx->test_server_ctx->accepted == 1 && tests_ctx->test_client_ctx->connected == 1) {
+        if (tests_ctx->test_server->accepted == 1 && tests_ctx->test_client->connected == 1) {
             pthread_mutex_unlock(&tests_ctx->mutex);
             break;
         }
@@ -309,42 +318,88 @@ static void on_write(void *ctx, int ecode)
 {
     int next_write_size;
     struct test_client *test_client = ctx;
-    struct connection_tests_ctx *test = test_client->test_ctx;
+    struct connection_tests *tests_fixture = test_client->tests_fixture;
     
-    ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
-    test_client->written += BUFSIZ;
-    ASSERT_LE_INT(test_client->written, test->test_data_size);
-    if (test_client->written == test->test_data_size)
+    printf("ON WRITE: ecode: %d, test_client: %p\n", ecode, test_client);
+    if (test_client->written != tests_fixture->test_data_size)
+        ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
+    else
         return;
     
-    next_write_size = CIO_MIN(BUFSIZ, test->test_data_size - test_client->written);
+    test_client->written += BUFSIZ;
+    ASSERT_LE_INT(test_client->written, tests_fixture->test_data_size);
+    if (test_client->written == tests_fixture->test_data_size)
+        return;
+    
+    next_write_size = CIO_MIN(BUFSIZ, tests_fixture->test_data_size - test_client->written);
     cio_tcp_connection_async_write(test_client->connection,
-                                   test->test_data + test_client->written,
+                                   tests_fixture->test_data + test_client->written,
                                    next_write_size, on_write);
 }
 
 static void on_read(void *ctx, int ecode, int bytes_read)
 {
+    struct test_client *test_client = ctx;
+    struct connection_tests *tests = test_client->tests_fixture;
     
+    printf("ON READ: ecode: %d, test_client: %p, bytes_read: %d\n", ecode, test_client, bytes_read);
+    ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
+    ASSERT_EQ_INT(0, pthread_mutex_lock(&test_client->mutex));
+    growable_buffer_append(test_client->total_read_buf, test_client->read_buf, bytes_read);
+    ASSERT_EQ_INT(0, pthread_mutex_unlock(&test_client->mutex));
+    
+    if (test_client->total_read_buf->size == tests->test_data_size) {
+        ASSERT_EQ_INT(0, memcmp(test_client->total_read_buf, tests->test_data,
+                                tests->test_data_size));
+        return;
+    }
+    
+    cio_tcp_connection_async_read(test_client->connection, test_client->read_buf,
+                                  sizeof(test_client->read_buf), on_read);
 }
 
-static void when_data_transfer_is_started(struct connection_tests_ctx *tests_ctx)
+static void when_data_transfer_is_started(struct connection_tests *tests_ctx)
 {
-    ASSERT_NE_PTR(NULL, tests_ctx->test_client_ctx->connection);
-    ASSERT_NE_PTR(NULL, tests_ctx->test_server_ctx->server_client->connection);
+    ASSERT_NE_PTR(NULL, tests_ctx->test_client->connection);
+    ASSERT_NE_PTR(NULL, tests_ctx->test_server->server_client->connection);
     
-    cio_tcp_connection_async_write(tests_ctx->test_client_ctx->connection,
-                                   tests_ctx->test_data + tests_ctx->test_client_ctx->written,
+    cio_tcp_connection_async_write(tests_ctx->test_client->connection,
+                                   tests_ctx->test_data + tests_ctx->test_client->written,
                                    BUFSIZ, on_write);
     
-    cio_tcp_connection_async_read(tests_ctx->test_client_ctx->connection,
-                                  tests_ctx->test_client_ctx->read_buf,
-                                  sizeof(tests_ctx->test_client_ctx->read_buf), on_read);
+//    cio_tcp_connection_async_read(tests_ctx->test_client->connection,
+//                                  tests_ctx->test_client->read_buf,
+//                                  sizeof(tests_ctx->test_client->read_buf), on_read);
+    
+//    cio_tcp_connection_async_write(tests_ctx->test_server->server_client->connection,
+//                                   tests_ctx->test_data + tests_ctx->test_server->server_client->written,
+//                                   BUFSIZ, on_write);
+    
+    cio_tcp_connection_async_read(tests_ctx->test_server->server_client->connection,
+                                  tests_ctx->test_server->server_client->read_buf,
+                                  sizeof(tests_ctx->test_server->server_client), on_read);
+
 }
 
-static void then_all_data_transferred_correctly(struct connection_tests_ctx *tests_ctx)
+static int all_data_read(struct test_client *client, int expected_size)
 {
+    int ready;
     
+    ASSERT_EQ_INT(0, pthread_mutex_lock(&client->mutex));
+    ready = client->total_read_buf->size == expected_size;
+    ASSERT_EQ_INT(0, pthread_mutex_unlock(&client->mutex));
+
+    return ready;
+}
+
+static void then_all_data_transferred_correctly(struct connection_tests *tests_ctx)
+{
+    while (1) {
+        if (all_data_read(tests_ctx->test_client, tests_ctx->test_data_size)
+            && all_data_read(tests_ctx->test_server->server_client, tests_ctx->test_data_size))
+            break;
+        usleep(10 * 1000);
+    }
 }
 
 /**
@@ -352,12 +407,12 @@ static void then_all_data_transferred_correctly(struct connection_tests_ctx *tes
  */
 void test_new_tcp_connection(void **ctx)
 {
-    ASSERT_NE_PTR(NULL, ((struct connection_tests_ctx *)(*ctx))->test_client_ctx->connection);
+    ASSERT_NE_PTR(NULL, ((struct connection_tests *)(*ctx))->test_client->connection);
 }
 
 void test_tcp_connection_connect_correct_address(void **ctx)
 {
-    struct connection_tests_ctx* test_ctx = *ctx;
+    struct connection_tests* test_ctx = *ctx;
     
     when_duplex_mode_is(test_ctx, 1);
     when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
@@ -367,7 +422,7 @@ void test_tcp_connection_connect_correct_address(void **ctx)
 
 void test_tcp_connection_read_write_duplex_success(void **ctx)
 {
-    struct connection_tests_ctx* test_ctx = *ctx;
+    struct connection_tests* test_ctx = *ctx;
     
     when_duplex_mode_is(test_ctx, 1);
     when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
