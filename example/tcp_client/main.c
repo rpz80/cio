@@ -54,7 +54,7 @@ void add_connection(struct connection_ctx *connection)
     }
 }
 
-void connection_ctx_set_status(struct connection_ctx *ctx, enum connection_result status)
+void connection_ctx_close(struct connection_ctx *ctx, enum connection_result status)
 {
     cio_free_tcp_connection_async(ctx->connection);
     ctx->connection = NULL;
@@ -82,6 +82,7 @@ static void send_file(struct connection_ctx *ctx, int send_header);
 static void on_read(void *ctx, int ecode, int bytes_read)
 {
     struct connection_ctx *cctx = ctx;
+    int i = 0;
 
     if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_read");
@@ -93,32 +94,30 @@ static void on_read(void *ctx, int ecode, int bytes_read)
         goto fail;
     }
 
-    if (bytes_read != 4) {
-        printf("on_read: received message of unexpected len for file %s, closing\n",
-            cctx->file_name);
-        goto fail;
-    }
+    while (bytes_read >= sizeof(int)) {
+        cctx->transferred = ntohl(*(int*)(cctx->read_buf + (i++ *sizeof(int))));
+        printf("\rFile %s: %d%%", cctx->file_name,
+            (int) (((double) cctx->transferred / cctx->size) * 100));
 
-    cctx->transferred = ntohl(*(int*)(cctx->read_buf));
-    printf("\rFile %s: %d%%", cctx->file_name,
-        (int) (((double) cctx->transferred / cctx->size) * 100));
-
-    if (cctx->transferred == cctx->size) {
-        connection_ctx_set_status(ctx, done);
-        printf("\nFile %s transferred successfully\n", cctx->file_name);
-        return;
+        if (cctx->transferred == cctx->size) {
+            connection_ctx_close(ctx, done);
+            printf("\nFile %s transferred successfully\n", cctx->file_name);
+            return;
+        }
+        
+        bytes_read -= sizeof(int);
     }
 
     if (mode == MODE_SEQ)
         send_file(ctx, 0);
     else
-        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
-            on_read);
+        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf + bytes_read,
+                                      sizeof(cctx->read_buf) - bytes_read, on_read);
 
     return;
 
 fail:
-    connection_ctx_set_status(ctx, failed);
+    connection_ctx_close(ctx, failed);
 }
 
 static void on_write(void *ctx, int ecode)
@@ -126,7 +125,7 @@ static void on_write(void *ctx, int ecode)
     struct connection_ctx *cctx = ctx;
 
     if (ecode != CIO_NO_ERROR) {
-        connection_ctx_set_status(ctx, failed);
+        connection_ctx_close(ctx, failed);
         return;
     }
 
@@ -159,9 +158,12 @@ static void send_file(struct connection_ctx *ctx, int send_header)
     file_bytes_read = read(ctx->fd, ctx->write_buf + offset, sizeof(ctx->write_buf) - offset);
     if (file_bytes_read == -1) {
         printf("Error reading file %s\n", ctx->file_name);
-        connection_ctx_set_status(ctx, failed);
+        connection_ctx_close(ctx, failed);
         return;
     }
+    
+    if (file_bytes_read == 0)
+        return;
 
     offset += file_bytes_read;
     cio_tcp_connection_async_write(ctx->connection, ctx->write_buf, offset, on_write);
@@ -173,13 +175,14 @@ static void on_connect(void *ctx, int ecode)
 
     if (ecode != CIO_NO_ERROR) {
         cio_perror((enum CIO_ERROR) ecode, "Connection failed");
-        connection_ctx_set_status(cctx, failed);
+        connection_ctx_close(cctx, failed);
         return;
     }
 
     send_file(ctx, 1);
     if (mode == MODE_ASYNC)
-        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf), on_read);
+        cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
+                                      on_read);
 }
 
 static void init_connection(void *event_loop, const char *addr, const char *full_path,
