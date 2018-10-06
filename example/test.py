@@ -6,6 +6,8 @@ import sys
 import shutil
 import subprocess
 import signal
+import filecmp
+
 from pathlib import Path
 
 
@@ -133,16 +135,32 @@ def wait_for_done(client_pid, server_pid):
     print('Stopping server... Done')
 
 
+def compare_results(args):
+	pjoin = lambda a, b : os.path.join(a, b)
+	tp = args.target_path
+	sp = args.source_path
+	target_dir_contents = [pjoin(tp, f) for f in os.listdir(args.target_path) if os.path.isfile(pjoin(tp, f))]
+	source_dir_contents = [pjoin(sp, f) for f in os.listdir(args.target_path) if os.path.isfile(pjoin(sp, f))]
+	for sf in source_dir_contents:
+		target_file = [f for f in target_dir_contents if os.path.basename(f) == os.path.basename(sf)]
+		if len(target_file) == 0:
+			raise Exception('File {} not found in the output'.format(sf))
+		if not filecmp.cmp(sf, target_file[0], shallow=False):
+			raise Exception('File {} differs from {}'.format(sf, target_file[0]))
+	print(target_dir_contents, source_dir_contents)
+
+
 def main():
     args = parse_args()
-    print('Building...\r', end='')
-    build_all(args)
-    print('Building... Done')
-    new_files_list = [str(i) + '.raw' for i in range(args.count)]
-    prepare_initial_dir(args, new_files_list)
-    server_pid = start_server(args)
-    client_pid = start_client(args)
-    wait_for_done(client_pid, server_pid)
+    # print('Building...\r', end='')
+    # build_all(args)
+    # print('Building... Done')
+    # new_files_list = [str(i) + '.raw' for i in range(args.count)]
+    # prepare_initial_dir(args, new_files_list)
+    # server_pid = start_server(args)
+    # client_pid = start_client(args)
+    # wait_for_done(client_pid, server_pid)
+    compare_results(args)
 
 
 if __name__ == '__main__':
