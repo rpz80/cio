@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("-b", "--build_dir", default='.build',
                         help="build directory relative to the project root")
     parser.add_argument("-m", "--mode", default='no-wait',
-                        help="build directory relative to the project root")
+                        help="client mode. 'seq' - write only after read and vice versa; 'async' - full duplex")
     return parser.parse_args()
 
 
@@ -136,30 +136,37 @@ def wait_for_done(client_pid, server_pid):
 
 
 def compare_results(args):
-	pjoin = lambda a, b : os.path.join(a, b)
-	tp = args.target_path
-	sp = args.source_path
-	target_dir_contents = [pjoin(tp, f) for f in os.listdir(args.target_path) if os.path.isfile(pjoin(tp, f))]
-	source_dir_contents = [pjoin(sp, f) for f in os.listdir(args.target_path) if os.path.isfile(pjoin(sp, f))]
-	for sf in source_dir_contents:
-		target_file = [f for f in target_dir_contents if os.path.basename(f) == os.path.basename(sf)]
-		if len(target_file) == 0:
-			raise Exception('File {} not found in the output'.format(sf))
-		if not filecmp.cmp(sf, target_file[0], shallow=False):
-			raise Exception('File {} differs from {}'.format(sf, target_file[0]))
-	print(target_dir_contents, source_dir_contents)
+    pjoin = lambda a, b : os.path.join(a, b)
+    tp = args.target_path
+    sp = args.source_path
+    target_dir_contents = [pjoin(tp, f) for f in os.listdir(args.target_path) if os.path.isfile(pjoin(tp, f))]
+    source_dir_contents = [pjoin(sp, f) for f in os.listdir(args.target_path) if os.path.isfile(pjoin(sp, f))]
+    for sf in source_dir_contents:
+        target_file = [f for f in target_dir_contents if os.path.basename(f) == os.path.basename(sf)]
+        if len(target_file) == 0:
+            raise Exception('File {} not found in the output'.format(sf))
+        if not filecmp.cmp(sf, target_file[0], shallow=False):
+            with open(sf, 'r') as sfd:
+                with open(target_file[0]) as tfd:
+                    sf_content = sfd.read()
+                    tf_content = tfd.read()
+                    for i in range(len(sf_content)):
+                        if sf_content[i] != tf_content[i]:
+                            print('Source file {} differs from target {}: pos: {}, source char: {} target char: {}'.
+                                  format(sf, target_file[0], i, sf_content[i], tf_content[i]))
+                            raise Exception('File {} differs from {}'.format(sf, target_file[0]))
 
 
 def main():
     args = parse_args()
-    # print('Building...\r', end='')
-    # build_all(args)
-    # print('Building... Done')
-    # new_files_list = [str(i) + '.raw' for i in range(args.count)]
-    # prepare_initial_dir(args, new_files_list)
-    # server_pid = start_server(args)
-    # client_pid = start_client(args)
-    # wait_for_done(client_pid, server_pid)
+    print('Building...\r', end='')
+    build_all(args)
+    print('Building... Done')
+    new_files_list = [str(i) + '.raw' for i in range(args.count)]
+    prepare_initial_dir(args, new_files_list)
+    server_pid = start_server(args)
+    client_pid = start_client(args)
+    wait_for_done(client_pid, server_pid)
     compare_results(args)
 
 

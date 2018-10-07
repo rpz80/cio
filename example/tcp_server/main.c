@@ -96,57 +96,58 @@ static void parse_buf(struct connection_ctx *cctx)
     int written, tmp;
 
     switch (cctx->state) {
-    case name_len:
-        if (cctx->buf_data_size < sizeof(cctx->file_name_len)) {
-            cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
-                sizeof(cctx->buf) - cctx->buf_data_size, on_read);
-        } else {
-            cctx->file_name_len = ntohl(*((int*)cctx->buf));
-            cctx->buf_data_offset += sizeof(cctx->file_name_len);
-            cctx->state = name;
-            parse_buf(cctx);
-        }
-        break;
-    case name:
-        if (cctx->buf_data_size - cctx->buf_data_offset < cctx->file_name_len) {
-            cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
-                sizeof(cctx->buf) - cctx->buf_data_size, on_read);
-        } else {
-            memcpy(cctx->file_name, cctx->buf + cctx->buf_data_offset, cctx->file_name_len);
-            cctx->buf_data_offset += cctx->file_name_len;
-            cctx->state = file_len;
-            parse_buf(cctx);
-        }
-        break;
-    case file_len:
-        if (cctx->buf_data_size - cctx->buf_data_offset < sizeof(cctx->file_size)) {
-            cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
-                sizeof(cctx->buf) - cctx->buf_data_size, on_read);
-        } else {
-            cctx->file_size = ntohl(*((int*)(cctx->buf + cctx->buf_data_offset)));
-            cctx->buf_data_offset += sizeof(cctx->file_size);
-            cctx->state = file;
-            if (prepare_file(cctx)) {
-                printf("Failed to prepare file %s\n", cctx->file_name);
+        case name_len:
+            if (cctx->buf_data_size < sizeof(cctx->file_name_len)) {
+                cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
+                    sizeof(cctx->buf) - cctx->buf_data_size, on_read);
+            } else {
+                cctx->file_name_len = ntohl(*((int*)cctx->buf));
+                cctx->buf_data_offset += sizeof(cctx->file_name_len);
+                cctx->state = name;
+                parse_buf(cctx);
+            }
+            break;
+        case name:
+            if (cctx->buf_data_size - cctx->buf_data_offset < cctx->file_name_len) {
+                cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
+                    sizeof(cctx->buf) - cctx->buf_data_size, on_read);
+            } else {
+                memcpy(cctx->file_name, cctx->buf + cctx->buf_data_offset, cctx->file_name_len);
+                cctx->buf_data_offset += cctx->file_name_len;
+                cctx->state = file_len;
+                parse_buf(cctx);
+            }
+            break;
+        case file_len:
+            if (cctx->buf_data_size - cctx->buf_data_offset < sizeof(cctx->file_size)) {
+                cio_tcp_connection_async_read(cctx->connection, cctx->buf + cctx->buf_data_size,
+                    sizeof(cctx->buf) - cctx->buf_data_size, on_read);
+            } else {
+                cctx->file_size = ntohl(*((int*)(cctx->buf + cctx->buf_data_offset)));
+                cctx->buf_data_offset += sizeof(cctx->file_size);
+                cctx->state = file;
+                if (prepare_file(cctx)) {
+                    printf("Failed to prepare file %s\n", cctx->file_name);
+                    goto fail;
+                }
+                parse_buf(cctx);
+            }
+            break;
+        case file:
+            written = write(cctx->fd, cctx->buf + cctx->buf_data_offset,
+                cctx->buf_data_size - cctx->buf_data_offset);
+            if (written == -1) {
+                perror("write");
                 goto fail;
             }
-            parse_buf(cctx);
-        }
-        break;
-    case file:
-        written = write(cctx->fd, cctx->buf + cctx->buf_data_offset,
-            cctx->buf_data_size - cctx->buf_data_offset);
-        if (written == -1) {
-            perror("write");
-            goto fail;
-        }
-        cctx->transferred += written;
-        cctx->buf_data_size = 0;
-        cctx->buf_data_offset = 0;
-        tmp = htonl(cctx->transferred);
-        memcpy(cctx->buf, &tmp, sizeof(tmp));
-        cio_tcp_connection_async_write(cctx->connection, &cctx->buf, sizeof(tmp), on_write);
-        break;
+            
+            cctx->transferred += written;
+            cctx->buf_data_size = 0;
+            cctx->buf_data_offset = 0;
+            tmp = htonl(cctx->transferred);
+            memcpy(cctx->buf, &tmp, sizeof(tmp));
+            cio_tcp_connection_async_write(cctx->connection, &cctx->buf, sizeof(tmp), on_write);
+            break;
     }
     return;
 

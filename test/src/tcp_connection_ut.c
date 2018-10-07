@@ -284,7 +284,7 @@ static void on_connect(void *ctx, int ecode)
     pthread_mutex_unlock(&tests_fixture->mutex);
 }
 
-static void when_echo_tcp_server_started(struct connection_tests *tests_ctx, const char *addr,
+static void when_test_tcp_server_started(struct connection_tests *tests_ctx, const char *addr,
                                          int port)
 {
     cio_tcp_acceptor_async_accept(tests_ctx->test_server->acceptor, addr, port, on_accept);
@@ -320,7 +320,6 @@ static void on_write(void *ctx, int ecode)
     struct test_client *test_client = ctx;
     struct connection_tests *tests_fixture = test_client->tests_fixture;
     
-    printf("ON WRITE: ecode: %d, test_client: %p\n", ecode, test_client);
     if (test_client->written != tests_fixture->test_data_size)
         ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
     else
@@ -342,7 +341,6 @@ static void on_read(void *ctx, int ecode, int bytes_read)
     struct test_client *test_client = ctx;
     struct connection_tests *tests = test_client->tests_fixture;
     
-    printf("ON READ: ecode: %d, test_client: %p, bytes_read: %d\n", ecode, test_client, bytes_read);
     ASSERT_EQ_INT(CIO_NO_ERROR, ecode);
     ASSERT_EQ_INT(0, pthread_mutex_lock(&test_client->mutex));
     growable_buffer_append(test_client->total_read_buf, test_client->read_buf, bytes_read);
@@ -415,7 +413,7 @@ void test_tcp_connection_connect_correct_address(void **ctx)
     struct connection_tests* test_ctx = *ctx;
     
     when_duplex_mode_is(test_ctx, 1);
-    when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
+    when_test_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
     when_connection_attempt_is_made(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
     then_both_side_connections_are_successful(test_ctx);
 }
@@ -425,7 +423,7 @@ void test_tcp_connection_read_write_duplex_success(void **ctx)
     struct connection_tests* test_ctx = *ctx;
     
     when_duplex_mode_is(test_ctx, 1);
-    when_echo_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
+    when_test_tcp_server_started(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
     when_connection_attempt_is_made(test_ctx, VALID_SERVER_ADDR, VALID_SERVER_PORT);
     then_both_side_connections_are_successful(test_ctx);
     

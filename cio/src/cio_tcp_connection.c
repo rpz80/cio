@@ -76,6 +76,7 @@ static void *new_tcp_connection_impl(void *event_loop, void *ctx, int fd)
         tctx->fd = -1;
         tctx->cstate = CIO_CS_INITIAL;
     } else {
+        toggle_fd_nonblocking(fd, 1);
         tctx->fd = fd;
         tctx->cstate = CIO_CS_CONNECTED;
         if ((cio_ecode = cio_event_loop_add_fd(tctx->event_loop, fd, CIO_FLAG_OUT | CIO_FLAG_IN,
@@ -453,20 +454,23 @@ static void do_write(struct write_ctx *write_ctx)
     int write_result = 0;
     struct tcp_connection_ctx *tcp_connection_ctx = write_ctx->tcp_connection;
     
-    while (write_ctx->written != write_ctx->len) {
+    while (1) {
 #ifdef __APPLE__
-        write_result = write(tcp_connection_ctx->fd, write_ctx->data,
+        write_result = write(tcp_connection_ctx->fd, write_ctx->data + write_ctx->written,
             write_ctx->len - write_ctx->written);
 #else
         write_result = send(tcp_connection_ctx->fd, write_ctx->data,
             write_ctx->len - write_ctx->written, MSG_NOSIGNAL);
 #endif
-        if (write_result >= 0) {
+        if (write_result == 0) {
+            return write_ctx_cleanup(write_ctx, CIO_CONNECTION_CLOSED_ERROR);
+        } else if (write_result > 0) {
             write_ctx->written += write_result;
-            if (write_ctx->written == write_ctx->len)
+            if (write_ctx->written == write_ctx->len) {
                 return write_ctx_cleanup(write_ctx, CIO_NO_ERROR);
-            else
+            } else {
                 continue;
+            }
         } else {
             system_ecode = errno;
             if (system_ecode == EWOULDBLOCK)
@@ -474,7 +478,7 @@ static void do_write(struct write_ctx *write_ctx)
             goto fail;
         }
     }
-
+    
 fail:
     if (cio_ecode)
         cio_perror(cio_ecode, "do_write");
@@ -548,7 +552,9 @@ static void do_read(struct read_ctx *read_ctx)
     struct tcp_connection_ctx *tcp_connection_ctx = read_ctx->tcp_connection;
 
     read_ctx->read = read(tcp_connection_ctx->fd, read_ctx->data, read_ctx->len - read_ctx->read);
-    if (read_ctx->read >= 0) {
+    if (read_ctx->read > 0) {
+        return read_ctx_cleanup(read_ctx, CIO_NO_ERROR);
+    } else if (read_ctx->read == 0) {
         return read_ctx_cleanup(read_ctx, CIO_NO_ERROR);
     } else {
         read_ctx->read = 0;

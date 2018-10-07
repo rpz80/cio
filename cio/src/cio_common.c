@@ -25,6 +25,7 @@ void cio_perror(enum CIO_ERROR error, const char *message)
         case CIO_POLL_ERROR:                PRINT_ERROR(message, "poll error"); break;
         case CIO_WRONG_STATE_ERROR:         PRINT_ERROR(message, "wrong state error"); break;
         case CIO_ALREADY_DESTROYED_ERROR:   PRINT_ERROR(message, "already destroyed"); break;
+        case CIO_CONNECTION_CLOSED_ERROR:   PRINT_ERROR(message, "connection closed"); break;
         case CIO_ERROR_COUNT:               assert(0); break;
     };
 

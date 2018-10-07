@@ -84,6 +84,9 @@ static void on_read(void *ctx, int ecode, int bytes_read)
     struct connection_ctx *cctx = ctx;
     int i = 0;
 
+    if (cctx->status != in_progress)
+        return;
+    
     if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_read");
         goto fail;
@@ -123,6 +126,9 @@ fail:
 static void on_write(void *ctx, int ecode)
 {
     struct connection_ctx *cctx = ctx;
+    
+    if (cctx->status != in_progress)
+        return;
 
     if (ecode != CIO_NO_ERROR) {
         connection_ctx_close(ctx, failed);
@@ -131,7 +137,7 @@ static void on_write(void *ctx, int ecode)
 
     if (mode == MODE_SEQ)
         cio_tcp_connection_async_read(cctx->connection, cctx->read_buf, sizeof(cctx->read_buf),
-            on_read);
+                                      on_read);
     else
         send_file(ctx, 0);
 }
