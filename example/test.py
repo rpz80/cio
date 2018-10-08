@@ -30,7 +30,7 @@ def parse_args():
                         help="size of each file in Mb")
     parser.add_argument("-b", "--build_dir", default='.build',
                         help="build directory relative to the project root")
-    parser.add_argument("-m", "--mode", default='no-wait',
+    parser.add_argument("-m", "--mode", default='async',
                         help="client mode. 'seq' - write only after read and vice versa; 'async' - full duplex")
     return parser.parse_args()
 
