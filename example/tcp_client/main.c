@@ -86,7 +86,7 @@ static void on_read(void *ctx, int ecode, int bytes_read)
 
     if (cctx->status != in_progress)
         return;
-    
+
     if (ecode != CIO_NO_ERROR) {
         cio_perror(ecode, "on_read");
         goto fail;
@@ -107,7 +107,7 @@ static void on_read(void *ctx, int ecode, int bytes_read)
             printf("\nFile %s transferred successfully\n", cctx->file_name);
             return;
         }
-        
+
         bytes_read -= sizeof(int);
     }
 
@@ -126,7 +126,7 @@ fail:
 static void on_write(void *ctx, int ecode)
 {
     struct connection_ctx *cctx = ctx;
-    
+
     if (cctx->status != in_progress)
         return;
 
@@ -167,7 +167,7 @@ static void send_file(struct connection_ctx *ctx, int send_header)
         connection_ctx_close(ctx, failed);
         return;
     }
-    
+
     if (file_bytes_read == 0)
         return;
 
