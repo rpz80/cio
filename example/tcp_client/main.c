@@ -349,7 +349,7 @@ int main(int argc, char *const argv[])
     }
 
     do_work(event_loop,addr_buf, path_buf);
-    wait_for_done(event_loop);
+    wait_for_done();
 
     while(connections) {
         tmp = connections;
