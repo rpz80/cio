@@ -38,7 +38,7 @@ enum {
     MODE_SEQ
 } mode;
 
-struct connection_ctx *connections;
+struct connection_ctx *connections = NULL;
 
 void add_connection(struct connection_ctx *connection)
 {
@@ -56,9 +56,6 @@ void add_connection(struct connection_ctx *connection)
 
 void connection_ctx_close(struct connection_ctx *ctx, enum connection_result status)
 {
-    cio_free_tcp_connection_async(ctx->connection);
-    ctx->connection = NULL;
-
     pthread_mutex_lock(&mutex);
     ctx->status = status;
     pthread_cond_signal(&cond);
@@ -69,7 +66,7 @@ void free_connection_ctx(struct connection_ctx *ctx)
 {
     if (ctx) {
         if (ctx->connection) {
-            cio_free_tcp_connection_async(ctx->connection);
+            cio_free_tcp_connection_sync(ctx->connection);
             close(ctx->fd);
         }
         free(ctx);
@@ -274,6 +271,7 @@ static int do_work(void *event_loop, const char *addr, const char *path)
             }
             init_connection(event_loop, addr, path_buf, entry->d_name, stat_buf.st_size);
         }
+        closedir(dir);
     } else {
         printf("Invalid path %s\n", path);
         return -1;
@@ -284,32 +282,22 @@ static int do_work(void *event_loop, const char *addr, const char *path)
 
 static int has_unfinished_connections()
 {
-    for (; connections; connections = connections->next) {
-        if (connections->status == in_progress)
+    struct connection_ctx *connection_ptr = connections;
+
+    for (; connection_ptr; connection_ptr = connection_ptr->next) {
+        if (connection_ptr->status == in_progress)
             return 1;
     }
 
     return 0;
 }
 
-void wait_for_done(void *event_loop)
+void wait_for_done()
 {
-    int ecode;
-    void *thread_result;
-
     pthread_mutex_lock(&mutex);
     while (has_unfinished_connections())
         pthread_cond_wait(&cond, &mutex);
     pthread_mutex_unlock(&mutex);
-
-    cio_event_loop_stop(event_loop);
-    if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
-        errno = ecode;
-        perror("pthread_join");
-        return;
-    }
-
-    printf("Event loop has finished, result: %d\n", (int) thread_result);
 }
 
 int main(int argc, char *const argv[])
@@ -318,7 +306,9 @@ int main(int argc, char *const argv[])
     char path_buf[BUFSIZ];
     char addr_buf[BUFSIZ];
     void *event_loop;
+    void *thread_result;
     struct connection_ctx *tmp;
+    int ecode;
 
     setvbuf(stdout, NULL, _IONBF, 0);
     memset(path_buf, 0, BUFSIZ);
@@ -358,7 +348,6 @@ int main(int argc, char *const argv[])
         return EXIT_FAILURE;
     }
 
-    connections = NULL;
     do_work(event_loop,addr_buf, path_buf);
     wait_for_done(event_loop);
 
@@ -368,5 +357,15 @@ int main(int argc, char *const argv[])
         free_connection_ctx(tmp);
     }
 
+    cio_event_loop_stop(event_loop);
+    if ((ecode = pthread_join(event_loop_thread, &thread_result))) {
+        errno = ecode;
+        perror("pthread_join");
+        return EXIT_FAILURE;
+    }
+
+    printf("Event loop has finished, result: %d\n", (int) thread_result);
     cio_free_event_loop(event_loop);
+
+    return EXIT_SUCCESS;
 }
